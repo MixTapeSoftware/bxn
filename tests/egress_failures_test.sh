@@ -200,7 +200,7 @@ assert_contains "box2 was locked meanwhile" "locked" "$(cat "$FAKE_INCUS_STATE/h
 assert_eq "box's proxy drops bulk.example" no "$(allows box bulk.example)"
 assert_eq "and so does box2's" no "$(allows box2 bulk.example)"
 run ls
-assert_not_contains "ls has nothing to refresh" "hosts changed since applied" "$OUT"
+assert_not_contains "ls has nothing to refresh" "changed since applied" "$OUT"
 
 echo "a lockdown whose container status can't be read"
 make_box d 10.201.0.80
