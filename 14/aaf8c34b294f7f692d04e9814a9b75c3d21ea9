@@ -1,0 +1,21 @@
+bxn.doctor
+  s_72cef02a544353::t_ddddd839ec0f13 401-406,409-410
+tests/doctor_test.sh
+  s_72cef02a544353::t_578364ce6619fe 215-216,218-219,221-223
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "14aaf8c34b294f7f692d04e9814a9b75c3d21ea9",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
