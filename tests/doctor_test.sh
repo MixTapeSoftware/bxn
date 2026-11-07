@@ -25,7 +25,8 @@ assert_not_contains() {
   else FAIL=$((FAIL+1)); echo "  FAIL $1"; echo "    expected not to contain: $2"; echo "    actual: $3"; fi
 }
 
-SANDBOX="$(mktemp -d)"
+# Resolved, since a plugin directory is shown by its real path.
+SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$SANDBOX"' EXIT
 mkdir -p "$SANDBOX/bin" "$SANDBOX/sys/boxenbr0" "$SANDBOX/proc/net/ipv4"
 cp "$SCRIPT_DIR/lib/fake_incus" "$SANDBOX/bin/incus"
@@ -201,6 +202,37 @@ incus config set box user.boxen.egress.transition=enforce:10.201.0.60
 doctor
 assert_contains "an interrupted lockdown fails" "box is partway through turning its allowlist on" "$OUT"
 assert_contains "with the fix" "bxn egress refresh box" "$OUT"
+
+echo "plugins"
+assert_contains "the built-in plugins are reported" "ok    Optional plugins are the built-in ones" "$OUT"
+mkdir -p "$SANDBOX/plugins-dir"
+printf 'PLUGIN_ID="one"; PLUGIN_NAME="One"; PLUGIN_DESC="a plugin"\n' > "$SANDBOX/plugins-dir/50-one.sh"
+printf 'PLUGIN_ID="two"; PLUGIN_NAME="Two"; PLUGIN_DESC="another"\n' > "$SANDBOX/plugins-dir/50-two.sh"
+mkdir -p "$BOXEN_CONFIG_DIR"
+echo "$SANDBOX/plugins-dir" > "$BOXEN_CONFIG_DIR/plugins-source"
+doctor
+assert_contains "a directory source is counted" "ok    Optional plugins from $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source): 2" "$OUT"
+printf 'echo "not a plugin"\n' > "$SANDBOX/plugins-dir/50-one.sh"
+rm "$SANDBOX/plugins-dir/50-two.sh"
+doctor
+assert_not_contains "files that declare no plugin don't block" "FAIL  The plugin source" "$OUT"
+assert_contains "but warn" "warn  The plugin source $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source) has *.sh files in $SANDBOX/plugins-dir but none declares a plugin" "$OUT"
+assert_contains "with the fix" "bxn plugins update, or bxn plugins set builtin" "$OUT"
+rm "$SANDBOX/plugins-dir"/*.sh
+doctor
+assert_contains "no files at all fails, as a create would" "FAIL  The plugin source $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source) has no plugins (*.sh) in $SANDBOX/plugins-dir, so no container can be created" "$OUT"
+echo "$SANDBOX/gone" > "$BOXEN_CONFIG_DIR/plugins-source"
+doctor
+assert_eq "a source that isn't there blocks" "1" "$RC"
+assert_contains "and says so" "FAIL  The plugin source $SANDBOX/gone ($BOXEN_CONFIG_DIR/plugins-source) isn't a repository or a directory on this host" "$OUT"
+export XDG_DATA_HOME="$SANDBOX/data"
+echo "acme/boxen-plugins" > "$BOXEN_CONFIG_DIR/plugins-source"
+doctor
+assert_contains "a repository not fetched yet warns" "warn  The plugins from acme/boxen-plugins haven't been fetched yet" "$OUT"
+assert_contains "with the fix" "fix: bxn plugins update" "$OUT"
+BOXEN_PLUGINS_SOURCE=builtin doctor
+assert_contains "the variable beats the file" "ok    Optional plugins are the built-in ones" "$OUT"
+rm "$BOXEN_CONFIG_DIR/plugins-source"
 
 echo "help"
 out="$(bash "$REPO_ROOT/bxn" doctor --help)"
