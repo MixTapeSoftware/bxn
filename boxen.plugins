@@ -155,7 +155,7 @@ plugins_source_list() {
     [[ -f "$f" ]] || continue
     bash -c '
       PLUGIN_ID="" PLUGIN_NAME="" PLUGIN_DESC="" PLUGIN_AGENT_COMMAND=""
-      source "$1" 2>/dev/null
+      source "$1" >/dev/null 2>&1
       [ -n "$PLUGIN_ID" ] || exit 0
       printf "%s\t%s\t%s\t%s\n" "$PLUGIN_ID" "$PLUGIN_NAME" "$PLUGIN_DESC" "${PLUGIN_AGENT_COMMAND:+agent}"
     ' _ "$f"
