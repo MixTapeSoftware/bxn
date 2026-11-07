@@ -641,13 +641,14 @@ ask_plugins_source() {
   PLUGINS_SOURCE_SHOWN="$(printf '%s\n' "$choice" | _redact_urls)"
   log "Optional plugins from $PLUGINS_SOURCE_SHOWN at every build; change it with: bxn plugins set <source>"
   plugins_source_fetch "$choice"
-  # What the flags chose, by id: the slots change with the set.
+  # What the flags chose, by id: the slots change with the set. A shell
+  # (-1) has no id and is kept as it is.
   [[ "$AGENT_SLOT" == "" || "$AGENT_SLOT" == "-1" ]] || agent_id="${_P_ID[$AGENT_SLOT]}"
   for ((i=0; i<PLUGIN_COUNT; i++)); do
     [[ "${_P_SELECTED[$i]}" == "1" && -z "${_P_AGENT_COMMAND[$i]}" ]] && kept+=("${_P_ID[$i]}")
   done
   discover_plugins
-  AGENT_SLOT=""
+  [[ "$AGENT_SLOT" == "-1" ]] || AGENT_SLOT=""
   [[ -z "$agent_id" ]] || select_agent "$agent_id"
   for id in ${kept[@]+"${kept[@]}"}; do
     selected_set "$id" 1 || warn "No plugin '$id' in $PLUGINS_SOURCE_SHOWN, so its flag has no effect here"

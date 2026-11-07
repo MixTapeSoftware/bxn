@@ -234,22 +234,22 @@ if command -v script >/dev/null 2>&1 && script -qec true /dev/null >/dev/null 2>
   # Runs boxen.create in a pseudo-terminal, typing the keys piped in; the
   # agent is given, so the first picker is the plugin source and the second
   # the plugin checklist (Enter takes it).
-  tui() { local n="$1"; shift; timeout 90 script -qec "bash '$SANDBOX/repo/boxen.create' --name '$n' $* --agent agent --egress off -p '$SANDBOX/ws'" /dev/null > "$SANDBOX/tui.out" 2>&1 || true; }
+  tui() { local n="$1"; shift; timeout 90 script -qec "bash '$SANDBOX/repo/boxen.create' --name '$n' $* --egress off -p '$SANDBOX/ws'" /dev/null > "$SANDBOX/tui.out" 2>&1 || true; }
   plain() { sed $'s/\033\\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$SANDBOX/tui.out"; }
   fresh
-  { sleep 1; printf '\n'; sleep 0.5; printf '\n'; sleep 12; } | tui abox
+  { sleep 1; printf '\n'; sleep 0.5; printf '\n'; sleep 12; } | tui abox --agent agent
   assert_contains "it asks where the plugins come from" "Where do the optional plugins come from?" "$(plain)"
   assert_contains "and says it's asked once" "Asked once; the coding agents come with Boxen either way." "$(plain)"
   assert_eq "built in is saved" "builtin" "$(grep -v '^#' "$BOXEN_CONFIG_DIR/plugins-source")"
   assert_contains "and said so" "Optional plugins: Boxen's own; change it with: bxn plugins set <source>" "$(plain)"
   assert_eq "ours run" "agent ours" "$(ran)"
   rm -f "$SANDBOX/ran"
-  { sleep 1; printf '\n'; sleep 12; } | tui bbox
+  { sleep 1; printf '\n'; sleep 12; } | tui bbox --agent agent
   assert_eq "the next create doesn't ask" "0" "$(plain | grep -c 'Where do the optional plugins' || true)"
   assert_eq "and builds with ours" "agent ours" "$(ran)"
 
   fresh
-  { sleep 1; printf 'j'; sleep 0.3; printf '\n'; sleep 0.5; printf '%s\n' "file://$SANDBOX/nowhere"; sleep 2; printf '%s\n' "$REPO_URL#v1"; sleep 2; printf '\n'; sleep 12; } | tui cbox --ours
+  { sleep 1; printf 'j'; sleep 0.3; printf '\n'; sleep 0.5; printf '%s\n' "file://$SANDBOX/nowhere"; sleep 2; printf '%s\n' "$REPO_URL#v1"; sleep 2; printf '\n'; sleep 12; } | tui cbox --ours --agent agent
   assert_contains "a repository is asked for" "Repository: " "$(plain)"
   assert_contains "one that can't be fetched is refused, and asked again" "Could not fetch the plugins from file://$SANDBOX/nowhere" "$(plain)"
   assert_eq "the one that fetched is saved" "$REPO_URL#v1" "$(grep -v '^#' "$BOXEN_CONFIG_DIR/plugins-source")"
@@ -260,18 +260,25 @@ if command -v script >/dev/null 2>&1 && script -qec true /dev/null >/dev/null 2>
 
   fresh
   # Down, Enter: a repository; Enter on nothing: back to the picker; q: quit.
-  { sleep 1; printf 'j'; sleep 0.3; printf '\n'; sleep 0.8; printf '\n'; sleep 0.8; printf 'q'; sleep 3; } | tui dbox
+  { sleep 1; printf 'j'; sleep 0.3; printf '\n'; sleep 0.8; printf '\n'; sleep 0.8; printf 'q'; sleep 3; } | tui dbox --agent agent
   assert_contains "an empty repository goes back to the picker" "Where do the optional plugins come from?" "$(plain | sed -n '/^Repository: /,$p')"
   assert_contains "where q quits" "Aborted." "$(plain)"
   assert_eq "with nothing saved" "no" "$([[ -f "$BOXEN_CONFIG_DIR/plugins-source" ]] && echo yes || echo no)"
 
   fresh
-  { sleep 1; printf '\n'; sleep 12; } | tui ebox --plugins "$SANDBOX/dir"
+  { sleep 1; printf '\n'; sleep 12; } | tui ebox --plugins "$SANDBOX/dir" --agent agent
   assert_eq "--plugins skips the question" "0" "$(plain | grep -c 'Where do the optional plugins' || true)"
   assert_eq "and saves nothing" "no" "$([[ -f "$BOXEN_CONFIG_DIR/plugins-source" ]] && echo yes || echo no)"
-  { sleep 1; printf '\n'; sleep 3; } | tui fbox --dry-run
+  { sleep 1; printf '\n'; sleep 3; } | tui fbox --dry-run --agent agent
   assert_eq "the dry run doesn't ask either" "0" "$(plain | grep -c 'Where do the optional plugins' || true)"
   assert_contains "and says the plugins are built in" "Plugins:     built in" "$(plain)"
+
+  fresh
+  # Down, Enter, the repository, Enter: the checklist. No agent was asked for.
+  { sleep 1; printf 'j'; sleep 0.3; printf '\n'; sleep 0.5; printf '%s\n' "$REPO_URL#v1"; sleep 2; printf '\n'; sleep 12; } | tui sbox --agent shell
+  assert_eq "a shell chosen with --agent survives the new set" "0" "$(plain | grep -c 'Pick the coding agent' || true)"
+  assert_eq "and the container is a shell" "shell" "$(cfg sbox user.boxen.agent)"
+  assert_eq "with the repository's plugins" "theirs" "$(ran)"
 else
   echo "  skip  no script(1) for a pseudo-terminal"
 fi
