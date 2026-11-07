@@ -92,7 +92,7 @@ cmd_show() {
   plugins_source_peek "$PLUGINS_SOURCE" ||
     error "$PLUGINS_SOURCE_SHOWN isn't a repository or a directory on this host; bxn plugins set <source> picks another"
   if [[ -n "$PLUGINS_SOURCE_COMMIT" ]]; then
-    echo "  at commit ${PLUGINS_SOURCE_COMMIT:0:12}, fetched $(git -C "$SOURCE_PLUGINS_DIR" log -1 --format=%cd --date=short 2>/dev/null || echo '?'); bxn plugins update fetches it again"
+    echo "  at commit ${PLUGINS_SOURCE_COMMIT:0:12}, committed $(git -C "$SOURCE_PLUGINS_DIR" log -1 --format=%cd --date=short 2>/dev/null || echo '?'); bxn plugins update fetches it again"
   elif [[ -z "$SOURCE_PLUGINS_DIR" ]]; then
     echo "  not fetched yet: the first build does, or bxn plugins update"
   fi

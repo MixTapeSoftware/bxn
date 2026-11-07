@@ -28,7 +28,8 @@ assert_not_contains() {
   else FAIL=$((FAIL+1)); echo "  FAIL $1"; echo "    expected not to contain: $2"; echo "    actual: $3"; fi
 }
 
-SANDBOX="$(mktemp -d)"
+# Resolved, since a directory source is shown by its real path.
+SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$SANDBOX"' EXIT
 mkdir -p "$SANDBOX/bin" "$SANDBOX/repo/plugins" "$SANDBOX/home"
 cp "$SCRIPT_DIR/lib/fake_incus" "$SANDBOX/bin/incus"
@@ -97,7 +98,7 @@ echo "show, with a repository"
 plugins
 assert_eq "it works" "0" "$RC"
 assert_contains "the source and where it's set" "Optional plugins: $REPO_URL (from $FILE)" "$OUT"
-assert_contains "the commit and how to move on" "at commit ${commit1:0:12}, fetched $(date +%Y-%m-%d); bxn plugins update fetches it again" "$OUT"
+assert_contains "the commit, its date, and how to move on" "at commit ${commit1:0:12}, committed $(git -C "$SANDBOX/src" log -1 --format=%cd --date=short); bxn plugins update fetches it again" "$OUT"
 assert_contains "the agents come from the repository" "Agents, from $SANDBOX/repo/plugins:" "$OUT"
 assert_contains "and are listed" "agent              Agent" "$OUT"
 assert_not_contains "but not our optional plugin" "Ours" "$OUT"

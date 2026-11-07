@@ -25,7 +25,8 @@ assert_not_contains() {
   else FAIL=$((FAIL+1)); echo "  FAIL $1"; echo "    expected not to contain: $2"; echo "    actual: $3"; fi
 }
 
-SANDBOX="$(mktemp -d)"
+# Resolved, since a plugin directory is shown by its real path.
+SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$SANDBOX"' EXIT
 mkdir -p "$SANDBOX/bin" "$SANDBOX/sys/boxenbr0" "$SANDBOX/proc/net/ipv4"
 cp "$SCRIPT_DIR/lib/fake_incus" "$SANDBOX/bin/incus"
@@ -213,7 +214,8 @@ doctor
 assert_contains "a directory source is counted" "ok    Optional plugins from $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source): 2" "$OUT"
 rm "$SANDBOX/plugins-dir"/*.sh
 doctor
-assert_contains "one without plugins fails" "FAIL  The plugin source $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source) has no plugins in $SANDBOX/plugins-dir" "$OUT"
+assert_not_contains "one without plugins doesn't block" "FAIL  The plugin source" "$OUT"
+assert_contains "but warns" "warn  The plugin source $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source) has no plugins in $SANDBOX/plugins-dir" "$OUT"
 assert_contains "with the fix" "bxn plugins update, or bxn plugins set builtin" "$OUT"
 echo "$SANDBOX/gone" > "$BOXEN_CONFIG_DIR/plugins-source"
 doctor

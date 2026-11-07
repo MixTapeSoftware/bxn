@@ -400,7 +400,8 @@ check_plugins() {
   fi
   n="$(plugins_source_list "$SOURCE_PLUGINS_DIR" | wc -l | tr -d ' ')"
   if [[ "$n" == 0 ]]; then
-    bad "The plugin source $PLUGINS_SOURCE_SHOWN ($PLUGINS_SOURCE_FROM) has no plugins in $SOURCE_PLUGINS_DIR, so no container can be created" \
+    # A create goes ahead with the agents alone; it's the source that's off.
+    note "The plugin source $PLUGINS_SOURCE_SHOWN ($PLUGINS_SOURCE_FROM) has no plugins in $SOURCE_PLUGINS_DIR, so a container gets the agents and nothing else" \
       "bxn plugins update, or bxn plugins set builtin"
     return 0
   fi
