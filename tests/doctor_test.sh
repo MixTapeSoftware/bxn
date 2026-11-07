@@ -212,11 +212,15 @@ mkdir -p "$BOXEN_CONFIG_DIR"
 echo "$SANDBOX/plugins-dir" > "$BOXEN_CONFIG_DIR/plugins-source"
 doctor
 assert_contains "a directory source is counted" "ok    Optional plugins from $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source): 2" "$OUT"
+printf 'echo "not a plugin"\n' > "$SANDBOX/plugins-dir/50-one.sh"
+rm "$SANDBOX/plugins-dir/50-two.sh"
+doctor
+assert_not_contains "files that declare no plugin don't block" "FAIL  The plugin source" "$OUT"
+assert_contains "but warn" "warn  The plugin source $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source) has *.sh files in $SANDBOX/plugins-dir but none declares a plugin" "$OUT"
+assert_contains "with the fix" "bxn plugins update, or bxn plugins set builtin" "$OUT"
 rm "$SANDBOX/plugins-dir"/*.sh
 doctor
-assert_not_contains "one without plugins doesn't block" "FAIL  The plugin source" "$OUT"
-assert_contains "but warns" "warn  The plugin source $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source) has no plugins in $SANDBOX/plugins-dir" "$OUT"
-assert_contains "with the fix" "bxn plugins update, or bxn plugins set builtin" "$OUT"
+assert_contains "no files at all fails, as a create would" "FAIL  The plugin source $SANDBOX/plugins-dir ($BOXEN_CONFIG_DIR/plugins-source) has no plugins (*.sh) in $SANDBOX/plugins-dir, so no container can be created" "$OUT"
 echo "$SANDBOX/gone" > "$BOXEN_CONFIG_DIR/plugins-source"
 doctor
 assert_eq "a source that isn't there blocks" "1" "$RC"
