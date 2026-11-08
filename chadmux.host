@@ -105,6 +105,11 @@ host_install() {
       error "TPM clone failed; the Chadmux config is installed. Re-run to finish TPM setup"
   fi
 
+  # A TPM directory without its installer is a clone that was cut short (or
+  # isn't TPM): running on would only warn and then claim success.
+  [[ -x "$TPM_DIR/bin/install_plugins" ]] ||
+    error "$TPM_DIR has no bin/install_plugins, so it isn't a complete TPM clone. Remove it and run this again"
+
   log "Installing TPM plugins..."
   "$TPM_DIR/bin/install_plugins" || \
     warn "TPM plugin install returned non-zero — run prefix + I inside tmux to retry"

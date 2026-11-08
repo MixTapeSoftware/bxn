@@ -191,6 +191,13 @@ assert_contains "it's named" "still runs a proxy (port 10001) for gone" "$OUT"
 assert_contains "with how to remove it" "boxen-egress-ctl remove gone" "$OUT"
 assert_contains "and its rule set too" "Network rule set boxen-a-gone belongs to a container that's gone" "$OUT"
 
+echo stopping > "$FAKE_INCUS_STATE/ctl/boxen-egress/box/listening"
+doctor
+assert_eq "older proxies left by a narrowing fail" "1" "$RC"
+assert_contains "it says so" "box's proxy in boxen-egress didn't finish narrowing: older proxies still run with the earlier allowlist" "$OUT"
+assert_not_contains "not as no internet" "isn't listening" "$OUT"
+rm "$FAKE_INCUS_STATE/ctl/boxen-egress/box/listening"
+
 rm -rf "$FAKE_INCUS_STATE/ctl/boxen-egress/box"
 doctor
 assert_contains "a container with no proxy fails" "boxen-egress has no proxy for box" "$OUT"
