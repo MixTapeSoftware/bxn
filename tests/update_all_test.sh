@@ -115,6 +115,15 @@ assert_contains "it never comes up: says so" "Timed out waiting for c1" "$OUT"
 assert_eq "it never comes up: recorded failed" "status=failed details=c1" "$(record)"
 assert_eq "it never comes up: stopped again, as it was" "STOPPED" "$(status c1)"
 
+# The log directory can't be made (a file in its place): still recorded.
+fresh
+box c1 RUNNING
+stale
+touch "$SANDBOX/notadir"
+OUT="$(BOXEN_LOG_DIR="$SANDBOX/notadir/logs" bash "$REPO_ROOT/bxn" -ua 2>&1)" && RC=0 || RC=$?
+assert_eq "no log directory: exits non-zero" "1" "$RC"
+assert_contains "no log directory: recorded failed" "status=failed details=the run stopped" "$(record)"
+
 echo "builds"
 
 # Still being built: this shell stands in for its bxn create.
@@ -126,6 +135,9 @@ assert_eq "a build in progress: not started" "no" "$(started mid)"
 assert_not_contains "a build in progress: not updated" "Updating mid" "$OUT"
 assert_contains "a build in progress: says why" "Skipping mid: it's still being built" "$OUT"
 assert_eq "a build in progress: not a failure" "status=ok details=" "$(record)"
+assert_contains "a running one mid-build: skipped too" "Skipping mid2: it's still being built" "$OUT"
+assert_not_contains "…not updated" "Updating mid2" "$OUT"
+assert_eq "…and left running" "RUNNING" "$(status mid2)"
 
 # Its bxn create is gone (killed, or failed and kept).
 fresh

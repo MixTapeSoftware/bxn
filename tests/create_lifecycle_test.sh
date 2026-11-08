@@ -160,6 +160,16 @@ out="$(bxn egress refresh open2)"
 assert_contains "…bxn egress refresh <name> stops it too" "open2's build was abandoned (open); it's stopped" "$out"
 assert_eq "…and it is" "STOPPED" "$(status open2)"
 
+fresh
+create --name open3 --no-tui --die
+FAKE_INCUS_FAIL_CALL='^stop open3' bash "$SANDBOX/repo/bxn" egress refresh open3 >"$SANDBOX/out2" 2>&1 && rc=0 || rc=$?
+assert_eq "…one that won't stop: refresh fails" "1" "$rc"
+assert_contains "…saying how to stop it" "incus stop --force open3" "$(cat "$SANDBOX/out2")"
+
+fresh
+FAKE_INCUS_FAIL_CALL='^list user.managed-by' bash "$SANDBOX/repo/bxn" egress ls >"$SANDBOX/out2" 2>&1 && rc=0 || rc=$?
+assert_eq "bxn egress ls when Incus won't list: fails, not an empty table" "1" "$rc"
+
 # The last step fails after the allowlist's own record says done.
 fresh
 FAKE_INCUS_FAIL_EXEC='shims=' create --name sh1 --no-tui
@@ -216,6 +226,8 @@ incus init images:ubuntu/24.04 taken -c user.managed-by=boxen -c user.boxen.buil
 create --name taken --no-tui --egress off
 assert_eq "a name another run holds: refused" "1" "$RC"
 assert_not_contains "a name another run holds: never offered for deletion" "partially created" "$OUT"
+assert_eq "a name another run holds: it's still there" "yes" "$(exists taken)"
+assert_eq "…with its own run's tag" "someone-else" "$(cfg taken user.boxen.build.run)"
 
 echo ""
 echo "passed: $PASS  failed: $FAIL"

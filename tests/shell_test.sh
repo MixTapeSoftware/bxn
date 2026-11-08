@@ -53,6 +53,24 @@ launched() { local c; c="$(last_call)"; echo "${c#* -- }"; }
 
 echo "boxen.shell"
 
+# Run through a link, as from ~/.local/bin, on a host without realpath
+# (macOS 12 and earlier): it still finds the files next to the real one.
+mkdir -p "$SANDBOX/links" "$SANDBOX/norealpath"
+ln -s "$REPO_ROOT/boxen.shell" "$SANDBOX/links/boxen.shell"
+# Every command on PATH but realpath.
+IFS=: read -r -a _dirs <<< "$PATH"
+for _d in "${_dirs[@]}"; do
+  for _t in "$_d"/*; do
+    _n="${_t##*/}"
+    [[ "$_n" != realpath && -x "$_t" && ! -e "$SANDBOX/norealpath/$_n" ]] && ln -s "$_t" "$SANDBOX/norealpath/$_n"
+  done
+done
+unset _dirs _d _t _n
+fresh_box; with_user_groups
+out="$(PATH="$SANDBOX/norealpath" bash "$SANDBOX/links/boxen.shell" box 2>&1)" && rc=0 || rc=$?
+assert_eq "through a link, without realpath: it runs" "0" "$rc"
+assert_not_contains "…and finds boxen.build" "boxen.build" "$out"
+
 fresh_box; with_user_groups; with_sudo_group
 shell box >/dev/null 2>&1
 assert_eq "plain shell: user's own groups, primary first, no _sudo" \

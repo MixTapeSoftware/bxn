@@ -1,11 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
-# Next to the real file, also when run through a link in ~/.local/bin.
-_self="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null)" || _self="${BASH_SOURCE[0]}"
+# Next to the real file, also when run through a link in ~/.local/bin. macOS
+# 12 and earlier have no realpath: follow the links by hand, as bxn does.
+_self="${BASH_SOURCE[0]}"
+if command -v realpath >/dev/null 2>&1; then
+  _self="$(realpath "$_self")"
+else
+  while [[ -L "$_self" ]]; do
+    _link="$(readlink "$_self")"
+    case "$_link" in /*) _self="$_link" ;; *) _self="$(dirname "$_self")/$_link" ;; esac
+  done
+fi
 # shellcheck source=boxen.build
 source "$(cd "$(dirname "$_self")" && pwd)/boxen.build"
-unset _self
+unset _self _link
 
 WITH_SUDO=0
 CONTAINER=""

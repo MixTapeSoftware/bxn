@@ -97,8 +97,9 @@ wants_allowlist() {
 # Builds for an allowlist abandoned before their lock: no proxy yet, so
 # allowlisted leaves them out, though they may be running open.
 abandoned_before_lock() {
-  local c
-  for c in $(incus list user.managed-by=boxen --format csv --columns n 2>/dev/null); do
+  local c list
+  list="$(incus list user.managed-by=boxen --format csv --columns n 2>/dev/null)" || error "Could not list the containers"
+  for c in $list; do
     [[ -z "$(incus config get "$c" user.boxen.egress.container 2>/dev/null)" ]] || continue
     wants_allowlist "$c" && egress_build_abandoned "$c" && echo "$c"
   done
@@ -277,7 +278,7 @@ all_hosts() {
 }
 
 cmd_ls() {
-  local c="${1:-}" egress mode active port h
+  local c="${1:-}" egress mode active port h cs abandoned
   if [[ "${2:-}" == "--tsv" ]]; then
     need_container "$c"
     if [[ "${3:-}" == "--applied" ]]; then
@@ -308,9 +309,12 @@ cmd_ls() {
     hosts_with_sources "$c" | awk -F'\t' '{ printf "%-50s  %s\n", $1, $2 }'
     return 0
   fi
+  # Read first: a list that failed must fail ls, not read as no containers.
+  cs="$(allowlisted)" || exit 1
+  abandoned="$(abandoned_before_lock)" || exit 1
   printf '%-28s %-8s %-18s %-22s %s\n' CONTAINER MODE ACTIVE PROXY NOTES
-  for c in $(allowlisted); do status_line "$c"; done
-  for c in $(abandoned_before_lock); do
+  for c in $cs; do status_line "$c"; done
+  for c in $abandoned; do
     printf '%-28s %-8s %-18s %-22s %s\n' "$c" "$(incus config get "$c" user.boxen.egress 2>/dev/null)" "never locked" - \
       "build abandoned (open): it may be running without its allowlist; bxn egress refresh $c stops it; then bxn rm $c"
   done
@@ -390,7 +394,7 @@ cmd_log() {
 }
 
 cmd_refresh() {
-  local target="${1:-}" cs c failed=""
+  local target="${1:-}" cs c failed="" abandoned
   egress_ensure_approved
   if ! cmp -s <(egress_read_hosts "$EGRESS_SHIPPED") <(egress_read_hosts "$EGRESS_APPROVED"); then
     echo "The shipped egress baseline differs from the one you approved:"
@@ -406,7 +410,11 @@ cmd_refresh() {
   fi
   case "$target" in
     "") return 0 ;;
-    --all) cs="$(allowlisted) $(abandoned_before_lock)" ;;
+    --all)
+      cs="$(allowlisted)" || exit 1
+      abandoned="$(abandoned_before_lock)" || exit 1
+      cs="$cs $abandoned"
+      ;;
     *) need_container "$target"; cs="$target" ;;
   esac
   boxen_lock
@@ -415,6 +423,7 @@ cmd_refresh() {
     if wants_allowlist "$c" && egress_build_abandoned "$c"; then
       if egress_running "$c" && ! incus stop "$c" --force >/dev/null 2>&1; then
         warn "$c's build was abandoned ($(abandoned_at "$c")), and it couldn't be stopped. Stop it: incus stop --force $c"
+        failed="$failed $c"
         continue
       fi
       warn "$c's build was abandoned ($(abandoned_at "$c")); it's stopped. Rebuild it, or delete it: bxn rm $c"

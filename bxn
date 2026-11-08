@@ -189,9 +189,9 @@ cmd_update() {
 # won't start or stop.
 cmd_update_all() {
   local containers failed=() logfile name status was_running attempts why
+  trap 'write_status failed "the run stopped before it finished; run bxn -ua to see why"' EXIT
   ensure_log_dir
   logfile="$BOXEN_LOG_DIR/update-$(date +%Y%m%d-%H%M%S).log"
-  trap 'write_status failed "the run stopped before it finished; run bxn -ua to see why"' EXIT
   containers=$(incus list user.managed-by=boxen --format csv --columns ns 2>/dev/null) || {
     error "Failed to list containers"
   }
