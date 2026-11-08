@@ -175,6 +175,13 @@ HALF="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; 
 mkdir -p "$HALF" && git -C "$HALF" init -q
 peek="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; error(){ exit 1; }; source ./boxen.plugins; plugins_source_peek "$1"; echo "commit=[$PLUGINS_SOURCE_COMMIT] dir=[$SOURCE_PLUGINS_DIR]"' _ "$REPO_URL.half")"
 assert_eq "peek has no commit for it, not the word HEAD" "commit=[] dir=[]" "$peek"
+# A clone directory without .git, inside some other repository (a home in
+# git, say), must not report that repository's commit.
+rm -rf "$HALF" && mkdir -p "$HALF"
+git -C "$CACHE" init -q 2>/dev/null; git -C "$CACHE" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m outer
+peek="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; error(){ exit 1; }; source ./boxen.plugins; plugins_source_peek "$1"; echo "commit=[$PLUGINS_SOURCE_COMMIT] dir=[$SOURCE_PLUGINS_DIR]"' _ "$REPO_URL.half")"
+assert_eq "nor an enclosing repository's commit" "commit=[] dir=[]" "$peek"
+rm -rf "$CACHE/.git"
 rm -rf "$HALF"
 HALF="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; error(){ exit 1; }; source ./boxen.plugins; _plugins_source_clone_dir "$1"' _ "$REPO_URL")"
 rm -rf "$HALF" && mkdir -p "$HALF" && git -C "$HALF" init -q
@@ -184,6 +191,27 @@ assert_eq "a clone without its remote is finished, not refused" "0" "$RC"
 [[ "$RC" == 0 ]] || tail -20 "$SANDBOX/out"
 assert_eq "at the repository's head" "$commit2" "$(cfg hbox user.boxen.plugins.commit)"
 assert_eq "no lock is left behind" "" "$(ls -A "$CACHE" | grep lock || true)"
+# A lock left by a build that has exited is taken over; one held by a live
+# build is waited for, not skipped.
+CLONE="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; error(){ exit 1; }; source ./boxen.plugins; _plugins_source_clone_dir "$1"' _ "$REPO_URL")"
+LOCK="$(dirname "$CLONE")/.$(basename "$CLONE").lock"
+sh -c 'exit 0' & dead=$!; wait "$dead"
+ln -s "$dead" "$LOCK"
+fresh
+init lbox --plugins "$REPO_URL"
+assert_eq "a dead build's lock is taken over" "0" "$RC"
+assert_eq "and released after" "" "$(ls -A "$CACHE" | grep lock || true)"
+sleep 4 & live=$!
+ln -s "$live" "$LOCK"
+fresh
+start=$SECONDS
+init wbox --plugins "$REPO_URL"
+assert_eq "a live build's lock is waited for" "0" "$RC"
+assert_contains "and says so" "Waiting for another build fetching these plugins (pid $live)" "$(cat "$SANDBOX/out")"
+(( SECONDS - start >= 2 )) && waited=yes || waited=no
+assert_eq "for as long as it runs" "yes" "$waited"
+wait "$live" 2>/dev/null || true
+rm -f "$LOCK"
 
 echo "two URLs that read the same as a name"
 make_repo() {

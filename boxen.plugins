@@ -90,30 +90,35 @@ _plugins_source_clone_dir() {
 }
 
 # Usage: _plugins_source_lock <dir>; one fetch into a clone at a time, so two
-# builds at once don't trip over each other's checkout. mkdir is atomic on
-# Linux and macOS alike; a lock whose owner has exited is taken over, and
-# after two minutes of waiting the fetch goes ahead anyway.
+# builds at once don't trip over each other's checkout. The lock is a symlink
+# whose target is its owner's pid: ln -s creates it, owner included, in one
+# step on Linux and macOS alike. A build waits while the owner runs; a lock
+# whose owner has exited is taken over.
 _plugins_source_lock() {
-  local lock waited=0 pid
+  local lock pid moved said=""
   lock="$(dirname "$1")/.$(basename "$1").lock"
-  until mkdir "$lock" 2>/dev/null; do
-    pid="$(cat "$lock/pid" 2>/dev/null || true)"
+  until ln -s "$$" "$lock" 2>/dev/null; do
+    pid="$(readlink "$lock" 2>/dev/null || true)"
     # Ours already: a fetch in a $(...) that ended with error() left it, and
     # $$ there is this shell's.
     [[ "$pid" != "$$" ]] || return 0
     if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
-      rm -rf "$lock"
+      # Renamed, not removed, so only one waiter takes a stale lock away; and
+      # if what was renamed is no longer the stale one, it goes back.
+      if mv "$lock" "$lock.stale.$$" 2>/dev/null; then
+        moved="$(readlink "$lock.stale.$$" 2>/dev/null || true)"
+        if [[ "$moved" == "$pid" ]]; then rm -f "$lock.stale.$$"; else mv "$lock.stale.$$" "$lock"; fi
+      fi
       continue
     fi
-    (( waited++ < 120 )) || { warn "$lock is still held; fetching anyway"; return 0; }
+    [[ -n "$said" ]] || { log "Waiting for another build fetching these plugins (pid $pid)"; said=1; }
     sleep 1
   done
-  echo "$$" > "$lock/pid"
 }
 _plugins_source_unlock() {
   local lock
   lock="$(dirname "$1")/.$(basename "$1").lock"
-  [[ "$(cat "$lock/pid" 2>/dev/null || true)" != "$$" ]] || rm -rf "$lock"
+  [[ "$(readlink "$lock" 2>/dev/null || true)" != "$$" ]] || rm -f "$lock"
 }
 
 # Usage: plugins_source_fetch <spec>; sets SOURCE_PLUGINS_DIR and
@@ -186,6 +191,8 @@ plugins_source_peek() {
     dir="$(_plugins_source_clone_dir "$url")"
     # --verify: a clone whose first fetch failed has no commit, and plain
     # rev-parse would print "HEAD" for it.
+    # A directory without .git would let git find an enclosing repository.
+    [[ -d "$dir/.git" ]] || return 0
     PLUGINS_SOURCE_COMMIT="$(git -C "$dir" rev-parse -q --verify HEAD 2>/dev/null)" || { PLUGINS_SOURCE_COMMIT=""; return 0; }
   else
     [[ -z "$ref" ]] && dir="${spec/#\~/$HOME}" && [[ -d "$dir" ]] || return 1
