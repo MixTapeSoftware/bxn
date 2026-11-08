@@ -1,0 +1,38 @@
+tests/egress_ctl_state_test.sh
+  s_72cef02a544353::t_8b49cf16f8c0a1 185-188,194,199-202,210-213,218-221,289-302
+  s_72cef02a544353::t_bfd94947ef20ee 182-184
+  s_72cef02a544353::t_7fde3ba89d0b42 189-193
+  s_72cef02a544353::t_257878e71185c9 195-198
+  s_72cef02a544353::t_63ed6a717b5a10 203-205,207-209
+  s_72cef02a544353::t_b5f5818a566c22 214-217
+  s_72cef02a544353::t_77f61036aa1012 222-224
+  s_72cef02a544353::t_7f3ca59909d11e 164,181,206,225-227
+bxn.doctor
+  s_72cef02a544353::t_b94a389708a868 371
+bxn.egress
+  s_72cef02a544353::t_6d763857042785 389
+egress/boxen-egress-ctl
+  s_72cef02a544353::t_003982b247dc62 23-25,66-69,84-86,92,373,389-392,394-397,401,408,536
+tests/doctor_test.sh
+  s_72cef02a544353::t_76dcaff8c8deb7 197
+tests/egress_cli_test.sh
+  s_72cef02a544353::t_941a043ceb69a2 255
+tests/lib/fake_systemd
+  s_72cef02a544353::t_acdae398b79672 25-28,33-35,38-39,58-61,70-73,87,92,97,145,151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d74bd4d03e8294a9703f222c7bb8524530535a63",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
