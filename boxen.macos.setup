@@ -18,6 +18,28 @@ COLIMA_DISK="${COLIMA_DISK:-100}"
 COLIMA_PROFILE="${COLIMA_PROFILE:-boxen}"
 
 # ---------------------------------------------------------------------------
+# A dry run installs, creates and starts nothing: it says what the real run
+# would do first, and stops there, since everything after needs Incus.
+# ---------------------------------------------------------------------------
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+  _would=()
+  command -v colima >/dev/null 2>&1 || _would+=("install Colima (brew install colima)")
+  command -v incus >/dev/null 2>&1 || _would+=("install the Incus CLI (brew install incus)")
+  if ! command -v colima >/dev/null 2>&1 || ! colima list 2>/dev/null | grep -q "$COLIMA_PROFILE"; then
+    _would+=("create the Colima profile '${COLIMA_PROFILE}': ${COLIMA_CPUS} CPUs, ${COLIMA_MEMORY}GB memory, ${COLIMA_DISK}GB disk")
+  elif ! colima list 2>/dev/null | grep "$COLIMA_PROFILE" | grep -q "Running"; then
+    _would+=("start the Colima profile '${COLIMA_PROFILE}'")
+  fi
+  if [[ ${#_would[@]} -gt 0 ]]; then
+    echo "DRY RUN — nothing will be created"
+    for _w in "${_would[@]}"; do echo "  The real run would first $_w"; done
+    echo "  The rest needs Incus running, so the dry run stops here."
+    exit 0
+  fi
+  unset _would
+fi
+
+# ---------------------------------------------------------------------------
 # Check Colima
 # ---------------------------------------------------------------------------
 if ! command -v colima >/dev/null 2>&1; then

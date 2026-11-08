@@ -138,7 +138,8 @@ Options:
   -p, --path PATH           Host directory to copy in (default: current directory)
   -w, --workspace PATH      Where the copy goes in the container (default: /workspace)
   -f, --from TEMPLATE       Launch from a saved template (shorthand for --image incus-init/TEMPLATE)
-  -i, --image IMAGE         Base image override (default: ubuntu/24.04)
+  -i, --image IMAGE         Base image override (default: images:ubuntu/24.04);
+                            incus-init/NAME is a template, as --from NAME
   -t, --template            Save container as a reusable local template (empty workspace)
   --<plugin>                Pre-select a plugin (e.g. --1pass, --gh-token)
   --agent NAME              The coding agent: claude, codex, grok, or shell for none
@@ -296,7 +297,7 @@ Both directories are merged; on a `PLUGIN_ID` collision, the user plugin overrid
 | [VibeWise](https://github.com/nykooi1/vibe-wise) | Claude Code plugin from Anthropic's plugin directory: learn to build while Claude writes the code (`/vibe-wise:learn`). Opt-in (`--vibe-wise`); needs the Claude Code agent |
 | Tailscale + Supabase serve | Preset `tailscale serve` map for app + Supabase ports (443→3000, 4410→3010, 4431→3001, 5432→54321, 5433→54323, 5434→54324, 8443→8000); auto-selects Tailscale |
 
-Skip the TUI with `--no-tui` to use defaults, or pre-select plugins via CLI flags (`--1pass`, `--gh-token`, `--docker`).
+Skip the TUI with `--no-tui` to use defaults, or pre-select plugins via CLI flags (`--1pass`, `--gh-token`, `--docker`). Without a terminal (cron, CI, input from a pipe) there are no pickers either: the defaults are taken, as with `--no-tui`.
 
 Chadmux clones the `main` branch into `~/.config/tmux` and links `~/.tmux.conf` to the repo's config. To get newer config changes inside a container, run `git -C ~/.config/tmux pull --ff-only`, then reload with prefix + r.
 
@@ -358,7 +359,7 @@ plugin_install() {
 Optional extras:
 - `PLUGIN_AGENT_COMMAND="my-agent"` — identifies a coding agent; enables `--agent my-agent` and launch guidance
 - `PLUGIN_CLI_FLAGS="--my-tool"` — adds a CLI flag to pre-select without the TUI
-- `PLUGIN_NEEDS_PROMPT=1` + `plugin_prompt()` — collect user input before install
+- `PLUGIN_NEEDS_PROMPT=1` + `plugin_prompt()` — collect user input before install. The install hooks themselves run with stdin from `/dev/null`, so Ctrl-C stops the build rather than only the command inside the container; a hook that exits 130 stops it too
 - `PLUGIN_LOGIN_COMMAND="my-tool login"` — the command that logs the tool in, for a login the user has to do themselves; the build ends by saying how to run it from the host (`bxn <container> my-tool login`)
 - `PLUGIN_RUN_ON_LAUNCH=1` + `plugin_on_launch()` — re-run setup when launching from a template (for symlinks, config that doesn't survive snapshots)
 - `PLUGIN_EGRESS_ALLOW="host *.example.com"` — hosts the plugin needs under the [egress allowlist](#egress-allowlist), recorded on the container when it's created
