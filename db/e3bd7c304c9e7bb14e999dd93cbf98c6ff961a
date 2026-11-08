@@ -1,0 +1,21 @@
+tests/chadmux_host_test.sh
+  s_72cef02a544353::t_57944729b384ce 148-158
+chadmux.host
+  s_72cef02a544353::t_57944729b384ce 108-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dbe3bd7c304c9e7bb14e999dd93cbf98c6ff961a",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
