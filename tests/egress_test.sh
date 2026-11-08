@@ -176,6 +176,7 @@ done
 rm -rf "$SANDBOX/repo2"; mkdir -p "$SANDBOX/repo2"; cp -R "$REPO_ROOT/egress" "$SANDBOX/repo2/egress"
 echo "// test" >> "$SANDBOX/repo2/egress/boxen-smokescreen/main_test.go"
 echo "// test" >> "$SANDBOX/repo2/egress/boxen-smokescreen/uploads_test.go"
+echo "// test" >> "$SANDBOX/repo2/egress/boxen-smokescreen/fuzz_test.go"
 assert_eq "the Go tests aren't part of it" "$v" "$(eg "SCRIPT_DIR='$SANDBOX/repo2'; egress_proxy_version")"
 
 echo "the egress container"
