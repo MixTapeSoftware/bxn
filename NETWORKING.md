@@ -1,6 +1,6 @@
 # Networking
 
-How bxn limits what a container can reach, what that stops and what it doesn't, and how to watch for trouble. The commands are in the README, under [Network Isolation](README.md#network-isolation) and [Egress Allowlist](README.md#egress-allowlist). This is a best-effort defence; see [Limits](#limits).
+How bxn limits what a container can reach, what that stops and what it doesn't, and how to watch for trouble. The commands are in the README, under [Network Isolation](README.md#network-isolation) and [Egress Allowlist](README.md#egress-allowlist). This is a best-effort defence; see [Limits](#limits). For the rest of the sandbox (the kernel, root inside the container, credentials), see [SANDBOX.md](SANDBOX.md).
 
 ## What it does
 
