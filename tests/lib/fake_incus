@@ -424,6 +424,13 @@ case "$cmd" in
       done
       home="$root/home/$su_user"; mkdir -p "$home"
       stdin_file="$S/exec-stdin/$n"; [[ -f "$stdin_file" ]] || stdin_file=/dev/null
+      # bxn rm's check for unpushed work: the workspace it names is looked
+      # for inside the fake filesystem, never the host's own.
+      if [[ "$su_cmd" == "timeout 30 sh -s -- "* ]] && grep -q bxn-rm-check "$stdin_file"; then
+        env -i HOME="$home" USER="$su_user" PATH="$stub:$PATH" \
+          sh -s -- "$root${su_cmd#timeout 30 sh -s -- }" < "$stdin_file"
+        exit $?
+      fi
       if [[ "$has_cmd" == "1" ]]; then
         env -i HOME="$home" USER="$su_user" PATH="$stub:$PATH" sh -c "$su_cmd" < "$stdin_file"
       else
