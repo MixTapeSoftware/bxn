@@ -1,0 +1,53 @@
+tests/update_all_test.sh
+  s_72cef02a544353::t_537af14c27df18 1-117,127-137,141-159
+  s_72cef02a544353::t_5bb6ffd0b931ad 160
+bxn
+  s_72cef02a544353::t_7e8ecd1408e4c6 1185-1192
+  s_72cef02a544353::t_3b8d1d679a9b11 29-30,187-189,191,193-194,199,201-202,207-220,229-233,235-236,242-243,248,251-253,258-261,263,266,303-305,794
+boxen.build
+  s_72cef02a544353::t_ad8e7d55dc65d4 1-43,45-48
+  s_72cef02a544353::t_c4367cce9079d3 44
+tests/create_lifecycle_test.sh
+  s_72cef02a544353::t_2ca6f8914f1578 106-162,173-228,231
+README.md
+  s_72cef02a544353::t_5cae6ba34801f5 691-696,713-714
+  s_72cef02a544353::t_3b31aa8b49704e 141-142,300,362
+boxen.create
+  s_72cef02a544353::t_f9c694b64de073 187,202-207,213-219,267-268,1760-1763,1765-1766,1820,1832-1833,2118,2192
+  s_72cef02a544353::t_0aa779fd6fa2ca 1507,1568-1583,2089
+  s_72cef02a544353::t_ecef5956da0707 841-845,849,852
+  s_72cef02a544353::t_bfc1a42c06c704 1229,1234-1238
+  s_72cef02a544353::t_680ec068fef9b8 50-51,68,117,144,939-940,964,1012,1306,1500-1502,1505-1506,1508-1509,1915,1960,2018,2084-2087,2108
+boxen.egress
+  s_72cef02a544353::t_dc56550e08b1e2 20-21,584,587-588,590
+boxen.shell
+  s_72cef02a544353::t_b94942c73be6da 15-16,18,53-58,72-75
+bxn.doctor
+  s_72cef02a544353::t_e13df9512c3e34 282-299,353-354,444
+bxn.egress
+  s_72cef02a544353::t_e688bf1711a9f3 88-99,103-116,301-304,318-320,332,422-423,425,429,432
+tests/status_test.sh
+  s_72cef02a544353::t_b62141dea57ab5 45-48,192-205
+tests/template_scrub_test.sh
+  s_72cef02a544353::t_dac319f7b570b3 207-208
+tests/create_pickers_test.sh
+  s_72cef02a544353::t_2e82cef6ba008e 1-247
+boxen.macos.setup
+  s_72cef02a544353::t_88e5bd18a6da66 20-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bd5b6caf342e54bc726e73674b42be0cba2e72ef",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
