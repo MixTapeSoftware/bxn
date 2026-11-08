@@ -1,14 +1,29 @@
 // egress/boxen-smokescreen/uploads.go
 // The upload watch: an early warning for bulk uploads to an allowed host. The
-// proxy can't see what a tunnel carries, but it sees how much. For each
-// CONNECT host it counts the bytes the client sends, across every tunnel of
-// this proxy process, over the trailing hour (in one-minute slots). The first
-// time a host goes over its limit, it writes one log line; it writes no
-// other for that host until an hour has passed.
+// proxy can't see what a tunnel carries, but it sees how much. It counts the
+// bytes the client sends through CONNECT tunnels, across every tunnel of this
+// proxy process, over the trailing hour (in one-minute slots), against the
+// limit that applies to the tunnel's host. The first time a count goes over
+// its limit, it writes one log line; it writes no other for that count until
+// an hour has passed.
 //
-// With the cap on (and the mode enforce), a write that would take a host over
+// What shares a count, so that spreading an upload over many names doesn't
+// multiply the limit:
+//   - a host with its own entry in the limits has a count of its own;
+//   - hosts a wildcard entry ("*.example.com") covers share that wildcard's
+//     count, so the wildcard's limit is for all of them together;
+//   - any other host gets the default limit, with a count of its own, except
+//     that hosts under one wildcard of the allowlist share a count, since
+//     the allowlist lets a container make up any number of such names.
+//
+// The counts are kept for at most uploadMaxCounts hosts with the default.
+// Past that, once hosts with nothing in the hour have been dropped, any other
+// such host is counted in one shared overflow count with the default limit:
+// counting them together is stricter, never looser.
+//
+// With the cap on (and the mode enforce), a write that would take a count over
 // its limit fails instead, which closes its tunnel, and so does every write
-// to that host until enough of the hour's bytes have aged out.
+// counted there until enough of the hour's bytes have aged out.
 //
 // The counts live in memory: a new generation starts from zero, and a
 // draining one keeps its own.
@@ -30,29 +45,37 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	acl "github.com/stripe/smokescreen/pkg/smokescreen/acl/v1"
 )
 
-// The one log line for a host over its limit; boxen-egress-ctl looks for it.
+// The one log line for a count over its limit; boxen-egress-ctl looks for it.
 const uploadMessage = "BOXEN-UPLOAD-LIMIT"
 
 const uploadSlots = 60 // one per minute of the hour
 
-// Hosts with nothing in the window are dropped once there are this many.
-const uploadMaxHosts = 10000
+// How many hosts with the default limit get a count of their own. Counts
+// with nothing in the hour are dropped to make room, at most once a minute.
+const uploadMaxCounts = 10000
+
+// The name the log gives the shared count for hosts past uploadMaxCounts.
+const overflowCount = "overflow"
 
 var errUploadCut = errors.New("boxen: tunnel closed by the upload cap")
 
 type uploadWatch struct {
 	limits map[string]int64 // host, "*.domain" or "default"; 0 is off
+	allow  map[string]bool  // the allowlist's wildcards, as "*.domain"
 	cut    bool
 	now    func() time.Time
 	log    *logrus.Logger
 
-	mu    sync.Mutex
-	hosts map[string]*hostUploads
+	mu       sync.Mutex
+	counts   map[string]*hostUploads // by host or "*.domain"
+	overflow hostUploads
+	pruned   int64 // the minute counts were last pruned
 }
 
-// One host's bytes per minute, in a ring indexed by Unix minute.
+// One count's bytes per minute, in a ring indexed by Unix minute.
 type hostUploads struct {
 	minute [uploadSlots]int64
 	bytes  [uploadSlots]int64
@@ -61,7 +84,7 @@ type hostUploads struct {
 
 // uploadWatchFromEnv reads the limits and the cap that boxen-proxy-run sets.
 // It returns nil when there are no limits, so nothing is counted. The caller
-// sets its logger.
+// sets its logger and the allowlist.
 func uploadWatchFromEnv(enforce bool) (*uploadWatch, error) {
 	capped := os.Getenv("BOXEN_UPLOAD_CAP")
 	if capped != "" && capped != "on" && capped != "off" {
@@ -79,7 +102,29 @@ func uploadWatchFromEnv(enforce bool) (*uploadWatch, error) {
 }
 
 func newUploadWatch(limits map[string]int64, cut bool, now func() time.Time, logger *logrus.Logger) *uploadWatch {
-	return &uploadWatch{limits: limits, cut: cut, now: now, log: logger, hosts: map[string]*hostUploads{}}
+	return &uploadWatch{limits: limits, allow: map[string]bool{}, cut: cut, now: now, log: logger, counts: map[string]*hostUploads{}}
+}
+
+// allowWildcards takes the wildcards from smokescreen's allowlist, so that
+// the hosts under each share a count. Call it before the proxy starts.
+func (w *uploadWatch) allowWildcards(d acl.Decider) {
+	a, ok := d.(*acl.ACL)
+	if !ok || a == nil {
+		return
+	}
+	globs := append([]string(nil), a.GlobalAllowList...)
+	if a.DefaultRule != nil {
+		globs = append(globs, a.DefaultRule.DomainGlobs...)
+	}
+	for _, r := range a.Rules {
+		globs = append(globs, r.DomainGlobs...)
+	}
+	for _, g := range globs {
+		g = strings.ToLower(strings.TrimSuffix(g, "."))
+		if strings.HasPrefix(g, "*.") && len(g) > 2 {
+			w.allow[g] = true
+		}
+	}
 }
 
 func readUploadLimits(path string) (map[string]int64, error) {
@@ -107,41 +152,72 @@ func readUploadLimits(path string) (map[string]int64, error) {
 	return limits, s.Err()
 }
 
-// limitFor is host's limit: its own entry, else the longest wildcard that
-// covers it (a wildcard covers subdomains, not the name itself, as in the
-// allowlist), else the default. 0 means no limit.
-func (w *uploadWatch) limitFor(host string) int64 {
-	if n, ok := w.limits[host]; ok {
-		return n
-	}
+// wildcardFor is the longest wildcard in set that covers host ("*.d" covers
+// subdomains of d, not d itself, as in the allowlist), or "".
+func wildcardFor(set func(string) bool, host string) string {
 	for d := host; strings.Contains(d, "."); {
 		d = d[strings.Index(d, ".")+1:]
-		if n, ok := w.limits["*."+d]; ok {
-			return n
+		if set("*." + d) {
+			return "*." + d
 		}
 	}
-	return w.limits["default"]
+	return ""
+}
+
+// limitFor is host's limit and the entry it comes from: its own entry, else
+// the longest wildcard that covers it, else "default". 0 means no limit.
+func (w *uploadWatch) limitFor(host string) (string, int64) {
+	if n, ok := w.limits[host]; ok {
+		return host, n
+	}
+	has := func(k string) bool { _, ok := w.limits[k]; return ok }
+	if k := wildcardFor(has, host); k != "" {
+		return k, w.limits[k]
+	}
+	return "default", w.limits["default"]
+}
+
+// countFor names the count host's bytes go to, given the entry its limit
+// comes from: the entry itself, unless that is the default, which is counted
+// per host or per wildcard of the allowlist.
+func (w *uploadWatch) countFor(host, key string) string {
+	if key != "default" {
+		return key
+	}
+	if k := wildcardFor(func(k string) bool { return w.allow[k] }, host); k != "" {
+		return k
+	}
+	return host
 }
 
 // add decides on n more bytes for host. It counts them and returns nil, or,
-// when the cap is on and they would take host over its limit, counts nothing
-// and returns an error.
+// when the cap is on and they would take host's count over its limit, counts
+// nothing and returns an error.
 func (w *uploadWatch) add(host string, port, n int) error {
-	limit := w.limitFor(host)
+	key, limit := w.limitFor(host)
 	if limit == 0 {
 		return nil
 	}
+	name := w.countFor(host, key)
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	now := w.now()
 	m := now.Unix() / 60
-	h := w.hosts[host]
+	h := w.counts[name]
 	if h == nil {
-		if len(w.hosts) >= uploadMaxHosts {
+		// Only hosts with the default and no allowlist wildcard can be
+		// any number; entries and wildcards are as many as their files.
+		bounded := key != "default" || name != host
+		if !bounded && len(w.counts) >= uploadMaxCounts && w.pruned != m {
 			w.prune(now, m)
+			w.pruned = m
 		}
-		h = &hostUploads{}
-		w.hosts[host] = h
+		if bounded || len(w.counts) < uploadMaxCounts {
+			h = &hostUploads{}
+			w.counts[name] = h
+		} else {
+			h, name = &w.overflow, overflowCount
+		}
 	}
 	sent := h.sent(m)
 	if sent+int64(n) <= limit {
@@ -149,18 +225,19 @@ func (w *uploadWatch) add(host string, port, n int) error {
 		return nil
 	}
 	if w.cut {
-		w.report(h, now, host, port, sent, limit)
+		w.report(h, now, host, port, key, name, sent, limit)
 		return errUploadCut
 	}
 	h.count(m, int64(n))
-	w.report(h, now, host, port, sent+int64(n), limit)
+	w.report(h, now, host, port, key, name, sent+int64(n), limit)
 	return nil
 }
 
-// report writes the host's log line, at most once an hour: the host, what it
-// was sent in the hour, its limit and whether the tunnel was cut. Never bytes
-// of the stream.
-func (w *uploadWatch) report(h *hostUploads, now time.Time, host string, port int, sent, limit int64) {
+// report writes the count's log line, at most once an hour: the host whose
+// write crossed the limit, the entry the limit comes from, the count it went
+// to (the host, a wildcard, or the overflow), what that count was sent in the
+// hour, the limit and whether the tunnel was cut. Never bytes of the stream.
+func (w *uploadWatch) report(h *hostUploads, now time.Time, host string, port int, key, name string, sent, limit int64) {
 	if now.Before(h.quiet) {
 		return
 	}
@@ -168,13 +245,15 @@ func (w *uploadWatch) report(h *hostUploads, now time.Time, host string, port in
 	w.log.WithFields(logrus.Fields{
 		"connect_host": printable(host),
 		"connect_port": port,
+		"limit_key":    printable(key),
+		"counted_for":  printable(name),
 		"window_bytes": sent,
 		"limit_bytes":  limit,
 		"cut":          w.cut,
 	}).Warn(uploadMessage)
 }
 
-// sent is the host's total for the hour up to minute m.
+// sent is the count's total for the hour up to minute m.
 func (h *hostUploads) sent(m int64) int64 {
 	var t int64
 	for i := range h.bytes {
@@ -193,11 +272,11 @@ func (h *hostUploads) count(m, n int64) {
 	h.bytes[i] += n
 }
 
-// prune drops hosts with nothing in the hour and no log line to hold back.
+// prune drops counts with nothing in the hour and no log line to hold back.
 func (w *uploadWatch) prune(now time.Time, m int64) {
-	for host, h := range w.hosts {
+	for name, h := range w.counts {
 		if h.sent(m) == 0 && !now.Before(h.quiet) {
-			delete(w.hosts, host)
+			delete(w.counts, name)
 		}
 	}
 }

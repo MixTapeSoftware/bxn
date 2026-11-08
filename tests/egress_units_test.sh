@@ -56,6 +56,11 @@ rec() { jq -c -n --arg m "$1" --arg u "boxen-gen_api@$2.service" '{MESSAGE: $m, 
 {
   rec '{"msg":"BOXEN-UPLOAD-LIMIT","time":"2026-11-06T10:00:00Z","connect_host":"up.example","connect_port":443,"window_bytes":327576371,"limit_bytes":262144000,"cut":false}' 4
   rec '{"msg":"BOXEN-UPLOAD-LIMIT","time":"2026-11-06T10:05:00Z","connect_host":"bad\u001b[31m.example","connect_port":443,"window_bytes":262000000,"limit_bytes":262144000,"cut":true}' 4
+  rec '{"msg":"BOXEN-UPLOAD-LIMIT","time":"2026-11-06T10:10:00Z","connect_host":"n7.cdn.example","connect_port":443,"limit_key":"default","counted_for":"*.cdn.example","window_bytes":262144001,"limit_bytes":262144000,"cut":false}' 4
+  rec '{"msg":"BOXEN-UPLOAD-LIMIT","time":"2026-11-06T10:11:00Z","connect_host":"x.github.com","connect_port":443,"limit_key":"*.github.com","counted_for":"*.github.com","window_bytes":2147483649,"limit_bytes":2147483648,"cut":true}' 4
+  rec '{"msg":"BOXEN-UPLOAD-LIMIT","time":"2026-11-06T10:12:00Z","connect_host":"h9.example","connect_port":443,"limit_key":"default","counted_for":"overflow","window_bytes":262144001,"limit_bytes":262144000,"cut":false}' 4
+  rec '{"msg":"BOXEN-UPLOAD-LIMIT","time":"2026-11-06T10:13:00Z","connect_host":"one.example","connect_port":443,"limit_key":"default","counted_for":"one.example","window_bytes":262144001,"limit_bytes":262144000,"cut":false}' 4
+  rec '{"msg":"BOXEN-UPLOAD-LIMIT","time":"2026-11-06T10:14:00Z","connect_host":"own.example","connect_port":443,"limit_key":"own.example","counted_for":"own.example","window_bytes":2147483649,"limit_bytes":2147483648,"cut":false}' 4
   rec '{"msg":"CANONICAL-PROXY-CN-CLOSE","requested_host":"up.example:443","bytes_out":1000,"bytes_in":5}' 4
   rec '{"msg":"CANONICAL-PROXY-CN-CLOSE","requested_host":"up.example:443","bytes_out":2500,"bytes_in":5}' 4
   rec '{"msg":"CANONICAL-PROXY-CN-CLOSE","requested_host":"big.example:443","bytes_out":9000,"bytes_in":5}' 4
@@ -68,8 +73,13 @@ log="$(bash "$SANDBOX/ctl" log api)"
 [[ "$log" == *$'2026-11-06T10:00:00Z\tup.example\t443\tlarge-upload\t312.4M sent in an hour; limit 250M; let through\t4'* ]]
 [[ "$log" == *$'bad?[31m.example\t443\tupload-cut\t249.8M sent in an hour; limit 250M; cut\t4'* ]]
 [[ "$log" == *$'ok.example\t443\tallowed\thost matched\t4'* ]]
-[[ "$(wc -l <<< "$log" | tr -d ' ')" == 3 ]]
-echo 'ok: log shows the upload watch lines as large-upload and upload-cut, sanitised; nothing else that names a marker'
+[[ "$log" == *$'n7.cdn.example\t443\tlarge-upload\t250M sent in an hour across *.cdn.example; limit 250M (default); let through\t4'* ]]
+[[ "$log" == *$'x.github.com\t443\tupload-cut\t2G sent in an hour across *.github.com; limit 2G (*.github.com); cut\t4'* ]]
+[[ "$log" == *$'h9.example\t443\tlarge-upload\t250M sent in an hour across hosts too many to count one by one; limit 250M (default); let through\t4'* ]]
+[[ "$log" == *$'one.example\t443\tlarge-upload\t250M sent in an hour; limit 250M (default); let through\t4'* ]]
+[[ "$log" == *$'own.example\t443\tlarge-upload\t2G sent in an hour; limit 2G; let through\t4'* ]]
+[[ "$(wc -l <<< "$log" | tr -d ' ')" == 8 ]]
+echo 'ok: log shows the upload watch lines as large-upload and upload-cut, sanitised, with the count and the limit entry; nothing else that names a marker'
 [[ "$(bash "$SANDBOX/ctl" uploads api)" == $'big.example\t9000\t1\nup.example\t3500\t2\nBOXEN-UPLOAD-LIMIT.example\t7\t1' ]]
 echo 'ok: uploads adds bytes_out per host, largest first, without the probe or look-alikes'
 
