@@ -112,17 +112,22 @@ printf 'extra.example\n' > "$BOXEN_CONFIG_DIR/egress-baseline.txt"
 run refresh box
 assert_eq "box allows your addition" yes "$(allows box extra.example)"
 good_gen="$(gen_of box)"
-chmod 000 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
-run allow --all more.example --yes
-assert_eq "allow --all fails" "1" "$RC"
-assert_contains "it names the file" "Could not read $BOXEN_CONFIG_DIR/egress-baseline.txt" "$OUT"
-chmod 600 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
-assert_eq "your additions are kept" "extra.example" "$(cat "$BOXEN_CONFIG_DIR/egress-baseline.txt")"
-chmod 000 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
-run refresh box
-assert_eq "refresh fails" "1" "$RC"
-chmod 600 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
-assert_eq "and box's proxy keeps them" "$good_gen" "$(gen_of box)"
+# Root reads a mode-000 file anyway, so this needs another user.
+if [[ "$(id -u)" == 0 ]]; then
+  echo "  skip  an unreadable file (running as root)"
+else
+  chmod 000 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+  run allow --all more.example --yes
+  assert_eq "allow --all fails" "1" "$RC"
+  assert_contains "it names the file" "Could not read $BOXEN_CONFIG_DIR/egress-baseline.txt" "$OUT"
+  chmod 600 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+  assert_eq "your additions are kept" "extra.example" "$(cat "$BOXEN_CONFIG_DIR/egress-baseline.txt")"
+  chmod 000 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+  run refresh box
+  assert_eq "refresh fails" "1" "$RC"
+  chmod 600 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+  assert_eq "and box's proxy keeps them" "$good_gen" "$(gen_of box)"
+fi
 rm -f "$BOXEN_CONFIG_DIR/egress-baseline.txt"
 run refresh box
 
