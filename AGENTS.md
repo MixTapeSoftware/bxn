@@ -18,6 +18,17 @@ scripts share container lifecycle, workspace, and plugin setup across agents.
   that the developer create a new container (`bxn -c <name>`) or open an
   existing one; each container has its own copy of the code, and git moves
   work between them.
+- Review every state machine a change creates or alters before it merges,
+  as part of its review. A state machine here is anything that moves
+  through states and keeps them: a lifecycle recorded on disk or in
+  `incus config` (a build, an egress generation, a plugin source's clone),
+  a mode, a lock, or an interactive screen's loop. Write it down (its
+  states, the events and their transitions, and what is persisted for
+  each state), name the invariants it must keep, and check every state
+  against every event, including a failure or a signal at each step, a
+  second run of the same command, two runs at once, a reboot, and stdin
+  that isn't a terminal. Reproduce each suspected defect with a test, and
+  say in the PR which machines were checked and what holds.
 - Prefer small, focused PRs. Break a large change into a stack of dependent
   PRs; the `stacked-prs` skill describes how.
 - Shared skills live in `.agents/skills/`; `.claude/skills` and
