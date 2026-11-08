@@ -113,6 +113,12 @@ FROM_BASE_IMAGE=1 copy
 assert_eq "from a template: succeeds" "0" "$RC"
 assert_contains "from a template: re-owns it" "box :: chown -R dev:dev /workspace" "$(execs)"
 assert_eq "from a template: does not copy over it" "no" "$([[ -e "$(root)/workspace/README" ]] && echo yes || echo no)"
+assert_contains "from a template: says the host directory wasn't copied" "$HOST was NOT copied in" "$OUT"
+
+fresh_box
+mkdir -p "$(root)/workspace"; echo old > "$(root)/workspace/leftover"
+FROM_BASE_IMAGE=1 NO_COPY=1 copy
+assert_not_contains "from a template, --no-copy: nothing to warn about" "NOT copied" "$OUT"
 
 fresh_box
 mkdir -p "$(root)/workspace"; echo old > "$(root)/workspace/leftover"

@@ -496,6 +496,12 @@ incus image list             # see saved templates
 incus image delete incus-init/my-base  # remove one
 ```
 
+To rebuild a template under the same name, remove both the container and the
+image first (`bxn rm my-base`, then `incus image delete incus-init/my-base`):
+`bxn -c --template` refuses a name that either one still uses, before it
+builds anything. If the publish fails or is interrupted, the container is
+started again with its tokens and Tailscale state back in place.
+
 
 ### Virtual Machines
 

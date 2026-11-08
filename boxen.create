@@ -171,13 +171,28 @@ warn_tailscale_backup() {
 }
 
 # While a finished build is published as a template. The container is complete,
-# so it is never offered for deletion; the Tailscale state it lent the publish
-# must still go back.
+# so it is never offered for deletion. A publish that failed or was interrupted
+# leaves it as it was before: running, with the Tailscale state and the token
+# lines it lent the publish.
 template_cleanup_on_exit() {
   local rc=$?
   trap - EXIT INT TERM HUP
   set +e
+  if ! start_and_wait; then
+    warn "Could not start '$CONTAINER_NAME' again: incus start $CONTAINER_NAME"
+  fi
   restore_tailscale_state || warn_tailscale_backup
+  if ! restore_saved_tokens; then
+    # The names only: the values never reach the terminal.
+    warn "The $(saved_token_names) line(s) of $CONTAINER_NAME's ~/.zshenv were taken out for the publish and could not be put back. Set each again: bxn -e $CONTAINER_NAME <NAME>"
+  fi
+  # A signal during the publish runs this once incus publish returns, maybe
+  # having published: the image says so. It didn't exist before the build
+  # (checked at the start), so it's this run's.
+  if [[ $rc -ne 0 && "${TEMPLATE_PUBLISHED:-0}" != "1" ]] &&
+     ! incus image info "incus-init/$CONTAINER_NAME" >/dev/null 2>&1; then
+    warn "No template saved. $CONTAINER_NAME itself is finished and kept."
+  fi
   exit "$rc"
 }
 
@@ -901,11 +916,9 @@ stash_tailscale_state() {
   incus exec "$CONTAINER_NAME" -- rm -rf /var/lib/tailscale
 }
 
-# Idempotent: nothing stashed, or already restored, is a success.
-restore_tailscale_state() {
-  [[ -n "${TS_STATE_BACKUP:-}" && -f "$TS_STATE_BACKUP" ]] || return 0
-  # From the exit trap, publish or start may have failed with the container
-  # stopped. Start it and wait, without error(): that would exit the trap.
+# Starts the container unless it's running, and waits until it answers.
+# Without error(), since the exit traps call it: that would exit the trap.
+start_and_wait() {
   local status elapsed=0
   status="$(incus list "^${CONTAINER_NAME}$" --format csv --columns s 2>/dev/null)"
   if [[ "$status" != "RUNNING" ]]; then
@@ -915,6 +928,14 @@ restore_tailscale_state() {
     (( elapsed++ < ${READY_TIMEOUT:-30} )) || return 1
     sleep 1
   done
+}
+
+# Idempotent: nothing stashed, or already restored, is a success.
+restore_tailscale_state() {
+  [[ -n "${TS_STATE_BACKUP:-}" && -f "$TS_STATE_BACKUP" ]] || return 0
+  # From the exit trap, publish or start may have failed with the container
+  # stopped.
+  start_and_wait || return 1
   # tailscaled came back up at boot with a fresh, logged-out state; replace it.
   incus exec "$CONTAINER_NAME" -- systemctl stop tailscaled 2>/dev/null || true
   incus exec "$CONTAINER_NAME" -- tar -C /var/lib -xf - < "$TS_STATE_BACKUP" || return 1
@@ -930,6 +951,8 @@ restore_tailscale_state() {
 # nothing the container writes reaches the host, which sees only the work that
 # leaves through git.
 # ---------------------------------------------------------------------------
+# Set when the workspace came with the template, so nothing was copied.
+WORKSPACE_FROM_TEMPLATE=0
 copy_workspace() {
   local existing
   # A template built before templates were emptied carries a workspace owned
@@ -940,7 +963,12 @@ copy_workspace() {
   if [[ -n "$existing" ]]; then
     [[ "$FROM_BASE_IMAGE" == "1" ]] || \
       error "$CONTAINER_WORKSPACE is not empty inside the container: $BASE_IMAGE already has files there."
+    WORKSPACE_FROM_TEMPLATE=1
     log "Reusing workspace from template; re-owning to $HOST_USER..."
+    # Its files are whoever built the template's, not this directory's.
+    if [[ "$SAVE_TEMPLATE" != "1" && "$NO_COPY" != "1" ]]; then
+      warn "$BASE_IMAGE carries a workspace of its own (it was saved before templates were emptied), so $WORKSPACE_PATH was NOT copied in. Rebuild the template for an empty one."
+    fi
   else
     incus exec "$CONTAINER_NAME" -- mkdir -p "$CONTAINER_WORKSPACE" </dev/null
     # The working tree as it is on disk, .git and uncommitted work included.
@@ -1204,18 +1232,39 @@ warn_old_node() {
   return 0
 }
 
+# The GH_TOKEN and OP_SERVICE_ACCOUNT_TOKEN lines of ~/.zshenv, kept here
+# while a template is published without them. Empty: nothing to put back.
+SAVED_TOKENS=""
+TEMPLATE_PUBLISHED=0
+
+# Their variable names, for messages: never the values.
+saved_token_names() {
+  printf '%s\n' "$SAVED_TOKENS" | sed -n 's/^export \([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | tr '\n' ' ' | sed 's/ $//'
+}
+
+# Puts the saved lines back, in place of any such lines there now, so it can
+# run twice. They go in on stdin, never in a command line: that would put the
+# tokens in the argv of incus on the host and of su in the container.
+restore_saved_tokens() {
+  [[ -n "$SAVED_TOKENS" ]] || return 0
+  printf '%s\n' "$SAVED_TOKENS" | incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -s /bin/sh -c \
+    "touch ~/.zshenv && sed -i '/^export OP_SERVICE_ACCOUNT_TOKEN=/d; /^export GH_TOKEN=/d' ~/.zshenv && cat >> ~/.zshenv" ||
+    return 1
+  SAVED_TOKENS=""
+}
+
 save_template() {
   local alias="incus-init/$CONTAINER_NAME"
   log "Saving as local template: $alias (stored in local Incus image store)"
 
-  # Save token lines from .zshenv, then strip them so they don't leak into the image
-  local saved_tokens
-  saved_tokens=$(incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c \
-    "grep -E '^export (GH_TOKEN|OP_SERVICE_ACCOUNT_TOKEN)=' ~/.zshenv 2>/dev/null || true")
+  # Save token lines from .zshenv, then strip them so they don't leak into the
+  # image. From here on the exit trap puts them back, whatever happens.
+  SAVED_TOKENS="$(incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c \
+    "grep -E '^export (GH_TOKEN|OP_SERVICE_ACCOUNT_TOKEN)=' ~/.zshenv 2>/dev/null || true" </dev/null)"
 
   log "Scrubbing secrets from image..."
   incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c \
-    "sed -i '/^export OP_SERVICE_ACCOUNT_TOKEN=/d; /^export GH_TOKEN=/d' ~/.zshenv 2>/dev/null || true"
+    "sed -i '/^export OP_SERVICE_ACCOUNT_TOKEN=/d; /^export GH_TOKEN=/d' ~/.zshenv 2>/dev/null || true" </dev/null
 
   # Empty the workspace before publishing. A template is a reusable *provisioned
   # base* (packages, mise, shell, tools) — not a frozen copy of one repo. Baking
@@ -1233,18 +1282,13 @@ save_template() {
   log "Stopping container for snapshot..."
   incus stop "$CONTAINER_NAME"
   incus publish "$CONTAINER_NAME" --alias "$alias"
+  TEMPLATE_PUBLISHED=1
   log "Starting container back up..."
   incus start "$CONTAINER_NAME"
   wait_for_container "$CONTAINER_NAME" "$READY_TIMEOUT"
 
   restore_tailscale_state || error "Could not restore the Tailscale state in $CONTAINER_NAME from $TS_STATE_BACKUP"
-
-  # Restore saved tokens to the running container
-  if [[ -n "$saved_tokens" ]]; then
-    incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c "cat >> ~/.zshenv <<'TOKENS'
-$saved_tokens
-TOKENS"
-  fi
+  restore_saved_tokens || error "Could not put the token lines back in $CONTAINER_NAME's ~/.zshenv"
 
   wait_for_network "$CONTAINER_NAME" "$READY_TIMEOUT"
   log "Saved template: $alias"
@@ -1398,6 +1442,11 @@ elif [[ "$SAVE_TEMPLATE" == "1" ]]; then
 fi
 if [[ -n "$CONTAINER_NAME" ]] && incus info "$CONTAINER_NAME" >/dev/null 2>&1; then
   error "Container '$CONTAINER_NAME' already exists"
+fi
+# The publish at the end would meet the old image's alias: say so before the
+# build, not after it.
+if [[ "$SAVE_TEMPLATE" == "1" ]] && incus image info "incus-init/$CONTAINER_NAME" >/dev/null 2>&1; then
+  error "A template named '$CONTAINER_NAME' already exists (incus-init/$CONTAINER_NAME). Remove it first: incus image delete incus-init/$CONTAINER_NAME"
 fi
 [[ "$CONTAINER_WORKSPACE" == /?* ]] || error "--workspace must be an absolute path other than / (got: $CONTAINER_WORKSPACE)"
 # Remote shell snippets cd into the workspace; quote it once for all of them.
@@ -2028,6 +2077,8 @@ fi
 echo "Memory:      $MEMORY_SHOWN ($MEMORY_WHY)"
 if [[ "$SAVE_TEMPLATE" == "1" ]]; then
   echo "Workspace:   empty (template base)"
+elif [[ "$WORKSPACE_FROM_TEMPLATE" == "1" ]]; then
+  echo "Workspace:   the template's own $CONTAINER_WORKSPACE; nothing was copied from the host"
 elif [[ "$REPO_CLONED" == "1" ]]; then
   echo "Workspace:   clone of $REPO_URL in $CONTAINER_WORKSPACE"
 elif [[ -n "$REPO_URL" ]]; then
