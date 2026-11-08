@@ -194,7 +194,20 @@ assert_contains "and its rule set too" "Network rule set boxen-a-gone belongs to
 rm -rf "$FAKE_INCUS_STATE/ctl/boxen-egress/box"
 doctor
 assert_contains "a container with no proxy fails" "boxen-egress has no proxy for box" "$OUT"
-assert_contains "with how to add it back" "boxen-egress-ctl add box 10000; then bxn egress refresh box" "$OUT"
+assert_contains "with how to add it back: refresh adds it" "bxn egress refresh box" "$OUT"
+assert_not_contains "not by hand, which could pick a taken port" "boxen-egress-ctl add" "$OUT"
+bash "$REPO_ROOT/bxn" egress refresh box >/dev/null 2>&1
+doctor
+assert_contains "refresh puts it back" "box's proxy in boxen-egress is in place" "$OUT"
+echo 10099 > "$FAKE_INCUS_STATE/ctl/boxen-egress/box/port"
+doctor
+assert_contains "a proxy on another port than the container's fails" "box's proxy in boxen-egress listens on 10099, not its port 10000" "$OUT"
+echo 10000 > "$FAKE_INCUS_STATE/ctl/boxen-egress/box/port"
+incus launch img twin -p default -p boxen-net -d "eth0,ipv4.address=10.201.0.92" >/dev/null
+incus config set twin user.managed-by=boxen user.boxen.net=isolated user.boxen.egress.container=boxen-egress user.boxen.egress.port=10000
+doctor
+assert_contains "two containers on one proxy port fail" "box and twin share proxy port 10000 in boxen-egress" "$OUT"
+incus delete --force twin
 FAKE_EGRESS_CTL_FAIL='^status$' doctor
 assert_contains "a proxy manager that doesn't answer fails" "The proxy manager in boxen-egress doesn't answer" "$OUT"
 

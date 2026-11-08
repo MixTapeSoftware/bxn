@@ -209,6 +209,12 @@ cmd_allow_rm() {
   fi
   c="${1:-}"; shift || true
   need_container "$c"
+  # Checked before anything changes: a typo or a container without an
+  # allowlist leaves it as it was.
+  [[ $# -gt 0 ]] || usage 1
+  for h in "$@"; do egress_host "$h" >/dev/null || error "Not a hostname bxn accepts: $h"; done
+  [[ -n "$(incus config get "$c" user.boxen.egress.container 2>/dev/null)" ]] ||
+    error "$c has no allowlist. Turn it on first: bxn egress mode $c enforce"
   boxen_lock
   attach "$c" ""
   edit_hosts "$op" "$c" "$@"
@@ -298,7 +304,15 @@ status_line() {
   if [[ "$mode" != off ]] && ! egress_nic_is_restricted "$c"; then notes+="card not locked; "; fi
   if egress_running "$egress"; then
     st="$(egress_ctl "$egress" status "$c" </dev/null 2>/dev/null)" || st=""
-    [[ "$(cut -f6 <<< "$st")" == "yes" ]] || notes+="no proxy listening; "
+    if [[ -z "$st" ]]; then
+      notes+="$egress has no proxy for it: bxn egress refresh $c; "
+    elif [[ "$(cut -f2 <<< "$st")" != "$port" ]]; then
+      notes+="its proxy listens on $(cut -f2 <<< "$st"), not $port: bxn egress refresh $c; "
+    elif [[ "$(cut -f6 <<< "$st")" != "yes" ]]; then
+      notes+="no proxy listening; "
+    elif [[ "$(cut -f5 <<< "$st"):$(cut -f4 <<< "$st")" != "$active" ]]; then
+      notes+="its proxy runs another policy than recorded: bxn egress refresh $c; "
+    fi
     local draining
     draining="$(cut -f7 <<< "$st" | wc -w | tr -d ' ')"
     (( draining > 1 )) && notes+="$((draining - 1)) older proxies draining; "
