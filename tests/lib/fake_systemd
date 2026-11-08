@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# tests/lib/fake_systemd
+# Stands in for systemd inside an egress container, so the real
+# egress/boxen-egress-ctl can run in a sandbox. Linked into a test's PATH as
+# systemctl, journalctl, systemd-escape, curl and sleep; it acts on the name
+# it was called by. tests/host/egress_ctl_test.sh runs the ctl with the real
+# systemd and smokescreen.
+#
+# State under $FAKE_SYSTEMD:
+#   units/<unit>   "<state> <pid>"; state is active, draining or inactive
+#   journal        one line per record: unit, tab, microseconds, tab, message
+#   port4700       the check unit holding the check copy's port
+# $FAKE_SYSTEMD_ETC is the ctl's ETC, for a generation's files.
+#
+# What it models: a generation acks with its PID when it starts; a check
+# copy can't bind the port while another one holds it; the probe's decision
+# record lands in the journal of whichever check copy holds the port; a
+# SIGTERMed generation drains until it's stopped.
+# Knobs:
+#   FAKE_SYSTEMD_HOLD_DELAY   seconds a holder's start takes; touches
+#                             $FAKE_SYSTEMD/hold-starting first
+#   FAKE_SYSTEMD_DIE_AFTER    a unit glob: once one starts, the caller is
+#                             killed with FAKE_SYSTEMD_DIE_SIGNAL (KILL)
+#   FAKE_SYSTEMD_STUCK        a unit glob that stop leaves running
+#   FAKE_CURL_LATE            the probe gets no answer and leaves no record
+set -uo pipefail
+F="${FAKE_SYSTEMD:?}"
+U="$F/units"
+mkdir -p "$U"
+touch "$F/journal"
+now() { echo "$(date +%s)000000"; }
+jr() { printf '%s\t%s\t%s\n' "$1" "$(now)" "$2" >> "$F/journal"; }
+st() { if [[ -f "$U/$1" ]]; then cut -d' ' -f1 "$U/$1"; else echo inactive; fi; }
+running() { local s; s="$(st "$1")"; [[ "$s" == active || "$s" == draining ]]; }
+# boxen-gen_<agent>@<n>.service -> that generation's directory
+gen_dir() { local a="${1#*_}" n="${1#*@}"; echo "$FAKE_SYSTEMD_ETC/agents/${a%@*}/gens/${n%.service}"; }
+last_arg() { local a=""; for a; do :; done; echo "$a"; }
+
+systemctl_() {
+  local cmd="$1" u p f n pid; shift
+  echo "systemctl $cmd $*" >> "$F/calls"
+  case "$cmd" in
+    daemon-reload|enable|disable|reset-failed) return 0 ;;
+    start)
+      u="$1"
+      case "$u" in
+        boxen-hold_*)
+          if [[ -n "${FAKE_SYSTEMD_HOLD_DELAY:-}" ]]; then touch "$F/hold-starting"; /bin/sleep "$FAKE_SYSTEMD_HOLD_DELAY"; fi
+          echo "active 1" > "$U/$u" ;;
+        boxen-gen_*|boxen-check_*)
+          running "$u" && return 0
+          [[ -f "$(gen_dir "$u")/mode" ]] || { jr "$u" "no such generation"; echo "inactive 0" > "$U/$u"; return 0; }
+          if [[ "$u" == boxen-check_* ]]; then
+            p="$(cat "$F/port4700" 2>/dev/null)"
+            if [[ -n "$p" ]] && running "$p"; then jr "$u" "bind: address already in use"; return 0; fi
+            echo "$u" > "$F/port4700"
+          fi
+          pid=$(( RANDOM + 1000 ))
+          echo "active $pid" > "$U/$u"
+          [[ "$u" == boxen-gen_* ]] && jr "boxen-egress-ack@x.service" "pid: $pid%0A"
+          # shellcheck disable=SC2053
+          if [[ -n "${FAKE_SYSTEMD_DIE_AFTER:-}" && "$u" == $FAKE_SYSTEMD_DIE_AFTER ]]; then
+            kill -s "${FAKE_SYSTEMD_DIE_SIGNAL:-KILL}" "$PPID"
+          fi ;;
+      esac ;;
+    stop)
+      u="$1"
+      # shellcheck disable=SC2053
+      [[ -n "${FAKE_SYSTEMD_STUCK:-}" && "$u" == $FAKE_SYSTEMD_STUCK ]] && return 0
+      [[ -f "$U/$u" ]] && echo "inactive 0" > "$U/$u"
+      return 0 ;;
+    kill)
+      u="$(last_arg "$@")"
+      [[ "$(st "$u")" == active ]] && echo "draining $(cut -d' ' -f2 "$U/$u")" > "$U/$u"
+      return 0 ;;
+    is-active) running "$(last_arg "$@")" ;;
+    show)
+      u="$(last_arg "$@")"
+      if running "$u"; then cut -d' ' -f2 "$U/$u"; else echo 0; fi ;;
+    list-units)
+      p="$(last_arg "$@")"
+      for f in "$U"/*; do
+        [[ -f "$f" ]] || continue
+        n="$(basename "$f")"
+        # shellcheck disable=SC2053
+        [[ "$n" == $p ]] && running "$n" && echo "$n loaded active running x"
+      done
+      return 0 ;;
+    *) echo "fake systemctl: unsupported: $cmd" >&2; return 1 ;;
+  esac
+}
+
+journalctl_() {
+  local unit="" after=0 show=0 json=0 u t m
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -u) unit="$2"; shift ;;
+      --after-cursor=*) after="${1#*=}" ;;
+      --show-cursor) show=1 ;;
+      json) json=1 ;;
+    esac
+    shift
+  done
+  if [[ "$show" == 1 ]]; then echo "-- cursor: $(wc -l < "$F/journal" | tr -d ' ')"; return 0; fi
+  tail -n "+$((after + 1))" "$F/journal" | while IFS=$'\t' read -r u t m; do
+    # shellcheck disable=SC2053
+    [[ -z "$unit" || "$u" == $unit ]] || continue
+    if [[ "$json" == 1 ]]; then
+      jq -cn --arg u "$u" --arg t "$t" --arg m "$m" '{_SYSTEMD_UNIT: $u, __REALTIME_TIMESTAMP: $t, MESSAGE: $m}'
+    else
+      echo "$m"
+    fi
+  done
+}
+
+# The probe through the check copy: enforce denies it, report would, off
+# allows it.
+curl_() {
+  local o d rec
+  [[ -n "${FAKE_CURL_LATE:-}" ]] && return 28
+  o="$(cat "$F/port4700" 2>/dev/null)"
+  [[ -n "$o" ]] && running "$o" || return 7
+  d="$(gen_dir "$o")"
+  case "$(cat "$d/mode")" in
+    enforce) rec='{"msg":"CANONICAL-PROXY-DECISION","allow":false,"decision_reason":"default rule policy used","requested_host":"boxen-probe.invalid:443"}' ;;
+    report) rec='{"msg":"CANONICAL-PROXY-DECISION","allow":true,"enforce_would_deny":true,"requested_host":"boxen-probe.invalid:443"}' ;;
+    off) rec='{"msg":"CANONICAL-PROXY-DECISION","allow":true,"requested_host":"boxen-probe.invalid:443"}' ;;
+  esac
+  jr "$o" "$rec"
+}
+
+case "$(basename "$0")" in
+  systemctl) systemctl_ "$@" ;;
+  journalctl) journalctl_ "$@" ;;
+  systemd-escape) printf '%s\n' "$1" | sed 's/-/\\x2d/g' ;;
+  curl) curl_ ;;
+  sleep) exit 0 ;;
+  *) echo "fake_systemd: called as $(basename "$0")" >&2; exit 1 ;;
+esac
