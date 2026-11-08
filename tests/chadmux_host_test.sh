@@ -145,6 +145,17 @@ assert 're-running after a failed TPM clone succeeds' install
 assert 're-run finishes TPM setup' test "$(status)" = installed
 assert 're-run leaves the config alone' test "$(cksum < "$HOME/.config/tmux/tmux.conf")" = "$config_before"
 
+# A TPM clone cut short (killed, so git couldn't clean up) leaves the
+# directory without its installer: install must stop and say so, not warn
+# and then report success.
+reset_home
+install
+rm -rf "$HOME/.tmux/plugins/tpm" && mkdir -p "$HOME/.tmux/plugins/tpm"
+assert 'a TPM directory without its installer is incomplete' test "$(status)" = incomplete
+refute 'install stops on a TPM directory without its installer' install
+assert 'and says what to remove' grep -q 'has no bin/install_plugins' "$fixture/install.log"
+refute 'and does not claim success' grep -q 'Chadmux installed' "$fixture/install.log"
+
 # A config created while Chadmux downloads (after the status check) must win.
 # This git wrapper creates one as soon as the Chadmux clone finishes.
 mkdir -p "$fixture/racebin"
