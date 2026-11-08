@@ -368,7 +368,7 @@ check_egress() {
     elif [[ "$(cut -f2 <<< "$found")" != "$port" ]]; then
       bad "$name's proxy in $eg listens on $(cut -f2 <<< "$found"), not its port $port, so $name has no internet" "bxn egress refresh $name"
     elif [[ "$(cut -f6 <<< "$found")" == stopping ]]; then
-      bad "$name's proxy in $eg didn't finish narrowing: older proxies still run with the earlier allowlist" "bxn egress refresh $name"
+      bad "$name's proxy in $eg didn't finish a change: a proxy it should have ended still runs with another policy" "bxn egress refresh $name"
     elif [[ "$(inst_field "$row" 2)" == RUNNING && "$(cut -f6 <<< "$found")" != yes ]]; then
       bad "$name's proxy in $eg isn't listening, so $name has no internet" "bxn egress refresh $name"
     else

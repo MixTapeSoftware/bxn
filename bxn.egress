@@ -386,7 +386,7 @@ status_line() {
     elif [[ "$(cut -f2 <<< "$st")" != "$port" ]]; then
       notes+="its proxy listens on $(cut -f2 <<< "$st"), not $port: bxn egress refresh $c; "
     elif [[ "$(cut -f6 <<< "$st")" == stopping ]]; then
-      notes+="a narrowing didn't finish, older proxies still run: bxn egress refresh $c; "
+      notes+="a change didn't finish, a proxy it should have ended still runs: bxn egress refresh $c; "
     elif [[ "$(cut -f6 <<< "$st")" != "yes" ]]; then
       notes+="no proxy listening; "
     elif [[ "$(cut -f5 <<< "$st"):$(cut -f4 <<< "$st")" != "$active" ]]; then

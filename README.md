@@ -26,6 +26,7 @@ Why shell scripts? They introduce no dependencies, are ergonomic enough for simp
   - [Egress Allowlist](#egress-allowlist)
 - [Runtime Management](#runtime-management)
 - [Linux Gotchas](#linux-gotchas)
+- [Tests](#tests)
 
 ## Prerequisites
 
@@ -821,3 +822,19 @@ incus network set incusbr0 ipv6.address none
 ```
 
 Without this, containers get an IPv6 address from Incus and prefer it (per RFC 6724). The symptom is confusing: `ping` works (resolves to IPv4) but `apt-get update` hangs trying to reach mirrors over IPv6.
+
+## Tests
+
+Each `tests/*_test.sh` runs on its own with Bash and exits 0 when it passes. To run them all and exit nonzero if any fails: `rc=0; for t in tests/*_test.sh; do bash "$t" || { echo "FAILED: $t"; rc=1; }; done; [ "$rc" = 0 ]`. They use fakes (`tests/lib/fake_incus`, `tests/lib/fake_systemd`), so they need no Incus. The scripts under `tests/host/` need real Incus or systemd; each says where to run it.
+
+### Property tests
+
+`tests/property_test.sh` runs stateful property tests with [Hypothesis](https://hypothesis.readthedocs.io/): it drives the real `egress/boxen-egress-ctl` on the fake systemd through random sequences of commands, faults (a failed check, a generation that won't start, the ctl killed partway), reboots and two commands at once, and checks the state machine's invariants after every step. `tests/property/test_egress_ctl.py` lists them. Without Hypothesis it skips (`python3 -m pip install --user hypothesis`).
+
+```bash
+bash tests/property_test.sh                                   # 50 fixed sequences, about two minutes
+BOXEN_PROPERTY_SEED=random BOXEN_PROPERTY_EXAMPLES=1000 \
+  BOXEN_PROPERTY_STATS=1 bash tests/property_test.sh          # explore; failures are kept in .hypothesis/
+```
+
+A failure prints the shortest sequence of commands it could find that breaks an invariant (unless `BOXEN_PROPERTY_SHRINK=0`, which reports it as found). Turn it into an example in `tests/egress_ctl_state_test.sh` when it's a real bug.
