@@ -1,0 +1,29 @@
+README.md
+  s_ca93edf61f0d5e::t_f67cbd0e0db115 371,534-538
+  s_ca93edf61f0d5e::t_6adfe8a51dc5b1 539
+plugins/10-docker.sh
+  s_ca93edf61f0d5e::t_f67cbd0e0db115 9-10
+bxn.new-plugin
+  s_ca93edf61f0d5e::t_f67cbd0e0db115 120
+boxen.create
+  s_ca93edf61f0d5e::t_f67cbd0e0db115 803,1642-1655,2187-2192
+tests/container_warning_test.sh
+  s_ca93edf61f0d5e::t_7d960c49b7f429 24-28
+  s_ca93edf61f0d5e::t_177a8ab84028f5 1-23,29-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1c973211e6d1d217b1f64390bdddbb0faf28edbf",
+  "prompts": {},
+  "sessions": {
+    "s_ca93edf61f0d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09a75c5-e2d1-4edd-baab-34535d2ad01f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
