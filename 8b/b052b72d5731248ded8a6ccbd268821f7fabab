@@ -1,0 +1,45 @@
+bxn.egress
+  s_72cef02a544353::t_2143e68c27c7af 311-312
+bxn.doctor
+  s_72cef02a544353::t_749b8d618d509e 354-355
+AGENTS.md
+  s_72cef02a544353::t_e773bf3baaae01 21-31
+README.md
+  s_72cef02a544353::t_dea6687e71e36e 325
+boxen.plugins
+  s_72cef02a544353::t_9a8c7322b3e7ce 15-16,92-123,127,136-137,139-147,150-155,159-163,165-166,168,192-196
+chadmux.host
+  s_72cef02a544353::t_4358c950e11131 108-112
+egress/boxen-egress-ctl
+  s_72cef02a544353::t_0357092daabb23 22-24,56-57,65-105,166-168,248,306,309-310,313,322,327,337,364,368-369,375-378,383,386,390,405-407,416,423-426,445,453,473,493,496-497,499-501,520-521,523,538
+tests/chadmux_host_test.sh
+  s_72cef02a544353::t_95a7f7e5d578e6 148-158
+tests/doctor_test.sh
+  s_72cef02a544353::t_e32fb40fbe406c 194-200
+tests/egress_cli_test.sh
+  s_72cef02a544353::t_bc11afcb509018 252-257
+tests/egress_ctl_state_test.sh
+  s_72cef02a544353::t_a5818fac337e21 1-244
+tests/lib/fake_egress_ctl
+  s_72cef02a544353::t_474ed46bc2b4f2 12,48-49
+tests/lib/fake_systemd
+  s_72cef02a544353::t_8c573e0246aeec 1-139
+tests/plugins_source_test.sh
+  s_72cef02a544353::t_04e1ffd0a0e5a8 158-168,171-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8bb052b72d5731248ded8a6ccbd268821f7fabab",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}
