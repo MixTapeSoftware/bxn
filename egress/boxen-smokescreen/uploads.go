@@ -140,11 +140,15 @@ func readUploadLimits(path string) (map[string]int64, error) {
 		if len(w) == 0 {
 			continue
 		}
-		n, err := strconv.ParseInt(w[len(w)-1], 10, 64)
-		if w[len(w)-1] == "off" {
+		// A size is decimal digits, which ParseInt takes with a sign too.
+		size := w[len(w)-1]
+		n, err := strconv.ParseInt(size, 10, 64)
+		if size == "off" {
 			n, err = 0, nil
+		} else if strings.Trim(size, "0123456789") != "" {
+			err = strconv.ErrSyntax
 		}
-		if len(w) != 2 || err != nil || n < 0 {
+		if len(w) != 2 || err != nil {
 			return nil, fmt.Errorf("%s line %d: want <host> <bytes>|off", path, line)
 		}
 		limits[w[0]] = n
