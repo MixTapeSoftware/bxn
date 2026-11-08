@@ -1,0 +1,51 @@
+AGENTS.md
+  s_72cef02a544353::t_b003f568c44978 21-31
+README.md
+  s_72cef02a544353::t_a3cd93abacb00e 325
+boxen.egress
+  s_72cef02a544353::t_1a64b36c34efd9 56,79-81,84,86-99,191-196,198-199,242-263,269,272-281,287-307,325,408-411,416-418,423,425-433,522-530,543-545,549-550,563-568,571,573,612,619-620,638,654,707
+boxen.plugins
+  s_72cef02a544353::t_cd525d8034d748 15-16,92-123,127,136-137,139-147,150-155,159-163,165-166,168,192-196
+bxn.doctor
+  s_72cef02a544353::t_ab79f4d1803c8a 367-371,379-392
+bxn.egress
+  s_72cef02a544353::t_4702a9bfe82e54 79-80,82-85,164-165,167-172,177,189-202,208,214-215,228,230,238,240,242-245,247-250,271-276,290,299,312-315,367,374-375,378,384-394
+chadmux.host
+  s_72cef02a544353::t_cc952913f46d1f 108-112
+egress/boxen-egress-ctl
+  s_72cef02a544353::t_6917b586b1423f 22-24,56-57,65-105,166-168,248,306,309-310,313,322,327,337,364,368-369,375-378,383,386,390,405-407,416,423-426,445,453,473,493,496-497,499-501,520-521,523,538
+tests/chadmux_host_test.sh
+  s_72cef02a544353::t_df071b6e78e91b 148-158
+tests/doctor_test.sh
+  s_72cef02a544353::t_6c7905633692e4 194-200,204-217
+tests/egress_cli_test.sh
+  s_72cef02a544353::t_20b9b1d8c038cc 252-257
+tests/egress_ctl_state_test.sh
+  s_72cef02a544353::t_06cc97855d622a 1-244
+tests/egress_failures_test.sh
+  s_72cef02a544353::t_757beaa83b8b73 1-229
+tests/egress_register_test.sh
+  s_72cef02a544353::t_179581e84cf6d0 1-191
+tests/lib/fake_egress_ctl
+  s_72cef02a544353::t_a634f4fc2b950c 12,48-49
+tests/lib/fake_systemd
+  s_72cef02a544353::t_fcfba588cc6e18 1-139
+tests/plugins_source_test.sh
+  s_72cef02a544353::t_922661639d8e6b 158-168,171-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "452421b09a748087a5c4cc6ce0e89ff910061c52",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
