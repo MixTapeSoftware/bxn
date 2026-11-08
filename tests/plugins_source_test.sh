@@ -178,7 +178,10 @@ assert_eq "peek has no commit for it, not the word HEAD" "commit=[] dir=[]" "$pe
 # A clone directory without .git, inside some other repository (a home in
 # git, say), must not report that repository's commit.
 rm -rf "$HALF" && mkdir -p "$HALF"
-git -C "$CACHE" init -q 2>/dev/null; git -C "$CACHE" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m outer
+# The trailing slash matches the git stub's pass-through pattern, so this is
+# a real repository around the clone directory.
+git -C "$CACHE/" init -q && git -C "$CACHE/" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m outer
+assert_eq "the enclosing repository exists" "0" "$(git -C "$CACHE/" rev-parse -q --verify HEAD >/dev/null && echo 0 || echo 1)"
 peek="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; error(){ exit 1; }; source ./boxen.plugins; plugins_source_peek "$1"; echo "commit=[$PLUGINS_SOURCE_COMMIT] dir=[$SOURCE_PLUGINS_DIR]"' _ "$REPO_URL.half")"
 assert_eq "nor an enclosing repository's commit" "commit=[] dir=[]" "$peek"
 rm -rf "$CACHE/.git"
