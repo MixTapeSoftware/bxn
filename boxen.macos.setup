@@ -17,6 +17,24 @@ COLIMA_MEMORY="${COLIMA_MEMORY:-8}"
 COLIMA_DISK="${COLIMA_DISK:-100}"
 COLIMA_PROFILE="${COLIMA_PROFILE:-boxen}"
 
+# Colima mounts your home directory into its VM, writable, unless told
+# otherwise. Instances never use it (a workspace is a copy, not a mount), and
+# a way out of a container would land next to it. So bxn starts its profile
+# with --mount none, which Colima saves with the profile: a start without
+# --mount keeps it. Colima reads `none` that way from 0.10.0; an older one
+# would take it for a folder, so it gets no flag and a warning instead.
+# True when the installed Colima is 0.10.0 or later.
+colima_takes_mount_none() {
+  local v major rest minor
+  v="$(colima version 2>/dev/null | awk 'NR == 1 && $2 == "version" { print $3 }')" || true
+  v="${v#v}"
+  major="${v%%.*}"
+  rest="${v#*.}"
+  minor="${rest%%.*}"
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
+  ((10#$major > 0 || 10#$minor >= 10))
+}
+
 # ---------------------------------------------------------------------------
 # A dry run installs, creates and starts nothing: it says what the real run
 # would do first, and stops there, since everything after needs Incus.
@@ -36,10 +54,12 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   command -v colima >/dev/null 2>&1 || _would+=("install Colima (brew install colima)")
   command -v incus >/dev/null 2>&1 || _would+=("install the Incus CLI (brew install incus)")
   _status="$(colima_profile_status)"
+  _mounts="your home directory mounted (Colima 0.10.0 or later can leave it out)"
+  colima_takes_mount_none && _mounts="no folders from this Mac mounted"
   if [[ -z "$_status" ]]; then
-    _would+=("create the Colima profile '${COLIMA_PROFILE}': ${COLIMA_CPUS} CPUs, ${COLIMA_MEMORY}GB memory, ${COLIMA_DISK}GB disk")
+    _would+=("create the Colima profile '${COLIMA_PROFILE}': ${COLIMA_CPUS} CPUs, ${COLIMA_MEMORY}GB memory, ${COLIMA_DISK}GB disk, $_mounts")
   elif [[ "$_status" != Running ]]; then
-    _would+=("start the Colima profile '${COLIMA_PROFILE}'")
+    _would+=("start the Colima profile '${COLIMA_PROFILE}', with $_mounts")
   fi
   if [[ ${#_would[@]} -gt 0 ]]; then
     echo "DRY RUN — nothing will be created"
@@ -47,7 +67,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "  The rest needs Incus running, so the dry run stops here."
     exit 0
   fi
-  unset _would _status
+  unset _would _status _mounts
 fi
 
 # ---------------------------------------------------------------------------
@@ -93,18 +113,38 @@ if [[ -n "$_status" ]]; then
 fi
 unset _status
 
+COLIMA_NO_MOUNTS=()
+if [[ "$PROFILE_RUNNING" == "0" ]]; then
+  if colima_takes_mount_none; then
+    COLIMA_NO_MOUNTS=(--mount none)
+  else
+    warn "This Colima can't start without mounting your home directory into its VM (that takes Colima 0.10.0 or later). A way out of a container would reach it. Upgrade with: brew upgrade colima"
+  fi
+fi
+
 if [[ "$PROFILE_EXISTS" == "0" ]]; then
   log "Creating Colima profile '${COLIMA_PROFILE}' with Incus runtime..."
-  log "Resources: ${COLIMA_CPUS} CPUs, ${COLIMA_MEMORY}GB memory, ${COLIMA_DISK}GB disk"
+  log "Resources: ${COLIMA_CPUS} CPUs, ${COLIMA_MEMORY}GB memory, ${COLIMA_DISK}GB disk${COLIMA_NO_MOUNTS[0]:+, no folders from this Mac mounted}"
   colima start --runtime incus --profile "$COLIMA_PROFILE" \
-    --cpu "$COLIMA_CPUS" --memory "$COLIMA_MEMORY" --disk "$COLIMA_DISK"
+    --cpu "$COLIMA_CPUS" --memory "$COLIMA_MEMORY" --disk "$COLIMA_DISK" ${COLIMA_NO_MOUNTS[@]+"${COLIMA_NO_MOUNTS[@]}"}
 
 elif [[ "$PROFILE_RUNNING" == "0" ]]; then
-  log "Starting Colima profile '${COLIMA_PROFILE}'..."
-  colima start --profile "$COLIMA_PROFILE"
+  # A profile made by an earlier bxn may mount the home directory: this
+  # start removes the mount, for good.
+  log "Starting Colima profile '${COLIMA_PROFILE}'${COLIMA_NO_MOUNTS[0]:+, with no folders from this Mac mounted}..."
+  colima start --profile "$COLIMA_PROFILE" ${COLIMA_NO_MOUNTS[@]+"${COLIMA_NO_MOUNTS[@]}"}
 
 else
   log "Colima profile '${COLIMA_PROFILE}' is running."
+  # Stopping it would stop every instance, so a running profile is only
+  # checked. Mounts show as virtiofs, 9p or sshfs in the VM.
+  _mounts="$(colima ssh --profile "$COLIMA_PROFILE" -- findmnt -rn -o TARGET -t virtiofs,9p,fuse.sshfs 2>/dev/null </dev/null | tr '\n' ' ' | LC_ALL=C tr -cd '[:print:]' || true)"
+  if [[ -n "${_mounts// /}" ]]; then
+    _fix="colima stop -p ${COLIMA_PROFILE} && colima start -p ${COLIMA_PROFILE} --mount none"
+    colima_takes_mount_none || _fix="brew upgrade colima, then $_fix"
+    warn "Colima profile '${COLIMA_PROFILE}' mounts folders from this Mac (${_mounts% }). A way out of a container would reach them. bxn doesn't use them; to remove them, when nothing is running: $_fix"
+  fi
+  unset _mounts _fix
 fi
 
 # ---------------------------------------------------------------------------

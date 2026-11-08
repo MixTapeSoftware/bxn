@@ -18,7 +18,7 @@ A container shares the host's kernel. A kernel bug that a container can reach ma
 
 The Docker plugin relaxes a container's sandbox: it turns on nesting and syscall interception, so Docker can manage its own containers on the shared kernel. In a VM, Docker relaxes nothing. Use `--docker` with `--vm`.
 
-On macOS, every instance runs inside Colima's Linux VM, so the shared kernel is that VM's, not macOS's. But Colima's default is to mount your home directory into that VM, writable. A way out of a container lands in a VM that can write to your Mac's home directory.
+On macOS, every instance runs inside Colima's Linux VM, so the shared kernel is that VM's, not macOS's. Colima's default is to mount your home directory into that VM, writable, so a way out of a container would land next to it. bxn starts its Colima profile with no folders from the Mac mounted (`--mount none`, which needs Colima 0.10.0 or later; with an older one bxn says to upgrade), and it doesn't use any. A profile made by an earlier bxn loses its mount the next time bxn starts it. While such a profile is running, `bxn -c` warns and says how to remove the mount: `colima stop -p boxen && colima start -p boxen --mount none`.
 
 ### Root inside the container
 
