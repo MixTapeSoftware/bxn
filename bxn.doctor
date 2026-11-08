@@ -279,6 +279,24 @@ check_bridge() {
   done
 }
 
+# --- Builds ------------------------------------------------------------------
+
+# A create that died partway (killed, a reboot, or a failure whose container
+# was kept) leaves one that bxn won't start (boxen.build). With an allowlist
+# or without.
+check_builds() {
+  local row name n=0
+  section "Builds"
+  for row in ${INSTANCES[@]+"${INSTANCES[@]}"}; do
+    [[ "$(inst_field "$row" 8)" == yes ]] || continue
+    name="$(inst_field "$row" 1)"
+    note "$name's build didn't finish, so bxn won't start it; it may still have build-time sudo, and its network may not be locked" \
+      "bxn rm $name, then create it again"
+    n=$((n + 1))
+  done
+  [[ $n -gt 0 ]] || ok "No build was left unfinished"
+}
+
 # --- Egress ------------------------------------------------------------------
 
 check_egress() {
@@ -332,10 +350,8 @@ check_egress() {
     name="$(inst_field "$row" 1)"
     tr="$(inst_field "$row" 6)"
     port="$(inst_field "$row" 7)"
-    if [[ "$(inst_field "$row" 8)" == yes ]]; then
-      note "$name's build was abandoned partway" "bxn rm $name, then create it again"
-      continue
-    fi
+    # Reported under Builds.
+    [[ "$(inst_field "$row" 8)" != yes ]] || continue
     if [[ "$tr" != - ]]; then
       bad "$name is partway through turning its allowlist on, so it stays stopped" "bxn egress refresh $name"
       continue
@@ -425,6 +441,7 @@ if check_incus; then
   check_lock
   if read_instances; then
     check_bridge
+    check_builds
     check_egress
   fi
 fi

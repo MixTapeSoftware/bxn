@@ -1,0 +1,48 @@
+# boxen.build
+# Whether a container's build finished. bxn create records it on every
+# build, at incus init: user.boxen.build=running and user.boxen.builder=
+# PID@BOOT, the bxn create doing it. The build sets user.boxen.build=done when
+# it completes. A build that isn't done, whose builder has exited or whose host
+# has rebooted since, was abandoned: it may still hold the build-time sudo
+# grant, and its network may not be locked yet, so nothing in bxn starts it.
+# A container built before these records falls back to the allowlist's
+# (user.boxen.egress.build and .builder, locked builds only).
+#
+# Defines functions only.
+
+boxen_boot_id() {
+  cat /proc/sys/kernel/random/boot_id 2>/dev/null || sysctl -n kern.boottime 2>/dev/null | tr -cd '0-9' || echo unknown
+}
+
+# Prints done, running (its builder is still at it) or abandoned. A container
+# with no record at all, or one that can't be read, counts as done.
+# Usage: build_state <container>
+build_state() {
+  local build b
+  build="$(incus config get "$1" user.boxen.build 2>/dev/null)" || build=""
+  if [[ -n "$build" ]]; then
+    b="$(incus config get "$1" user.boxen.builder 2>/dev/null)" || b=""
+  else
+    build="$(incus config get "$1" user.boxen.egress.build 2>/dev/null)" || build=""
+    b="$(incus config get "$1" user.boxen.egress.builder 2>/dev/null)" || b=""
+  fi
+  if [[ -z "$build" || "$build" == done ]]; then
+    echo done
+  elif [[ -n "$b" && "${b#*@}" == "$(boxen_boot_id)" ]] && kill -0 "${b%%@*}" 2>/dev/null; then
+    echo running
+  else
+    echo abandoned
+  fi
+}
+
+# Why bxn won't start a container whose build isn't done, or empty when it
+# would. Commands that start a stopped container (bxn <name>, bxn -ua,
+# bxn -e) say this instead.
+# Usage: build_unstartable <container>
+build_unstartable() {
+  case "$(build_state "$1")" in
+    running)   echo "$1 is still being built, and its build decides when it runs" ;;
+    abandoned) echo "$1's build didn't finish, so bxn won't start it: it may still have build-time sudo, and its network may not be locked. Delete it: bxn rm $1" ;;
+    *)         echo "" ;;
+  esac
+}

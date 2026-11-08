@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+# Next to the real file, also when run through a link in ~/.local/bin.
+_self="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null)" || _self="${BASH_SOURCE[0]}"
+# shellcheck source=boxen.build
+source "$(cd "$(dirname "$_self")" && pwd)/boxen.build"
+unset _self
+
 WITH_SUDO=0
 CONTAINER=""
 CMD_ARGS=()
@@ -35,6 +41,12 @@ if [[ "$STATUS" != "RUNNING" ]]; then
     echo "$CONTAINER is partway through turning its allowlist on, so it stays stopped. Finish it: bxn egress refresh $CONTAINER" >&2
     exit 1
   fi
+  # A build that isn't done: still running, or abandoned (boxen.build).
+  _why="$(build_unstartable "$CONTAINER")"
+  if [[ -n "$_why" ]]; then
+    echo "$_why" >&2
+    exit 1
+  fi
   echo "Starting $CONTAINER..."
   incus start "$CONTAINER"
   attempts=0
@@ -46,6 +58,10 @@ if [[ "$STATUS" != "RUNNING" ]]; then
       exit 1
     fi
   done
+fi
+
+if [[ "$(build_state "$CONTAINER")" == abandoned ]]; then
+  echo "Note: $CONTAINER's build didn't finish. It may still have build-time sudo, and its network may not be locked. Delete it: bxn rm $CONTAINER" >&2
 fi
 
 HOST_USER="$(id -un)"

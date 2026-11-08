@@ -42,6 +42,10 @@ case "$1" in
     echo "$*" >> "$STUB/calls"
     exit ;;
   list) ;;
+  # The build record of $STUB_ABANDONED: never finished, its builder gone.
+  config)
+    [[ "$2" == get && -n "${STUB_ABANDONED:-}" && "$3" == "$STUB_ABANDONED" && "$4" == user.boxen.build ]] && echo running
+    exit ;;
   *) exit 1 ;;
 esac
 n=$(( $(cat "$STUB/count" 2>/dev/null || echo 0) + 1 ))
@@ -184,6 +188,20 @@ if script -qec true /dev/null >/dev/null 2>&1; then
   frame=${out##*$'\033[H'}
   if [[ "$frame" == *"Stopped beta"* && "$frame" == *"Started gamma"* ]]; then both=yes; else both=no; fi
   assert_eq "earlier results stay visible" "yes" "$both"
+
+  # A container whose build didn't finish isn't started (boxen.build).
+  rm -f "$stub/count" "$stub/calls"
+  out=$(
+    {
+      sleep 1.5
+      printf 'j';      sleep 0.3   # alpha -> gamma, stopped
+      printf ' ';      sleep 1     # start gamma: refused
+      printf 'q';      sleep 1
+    } | STUB="$stub" STUB_ABANDONED=gamma PATH="$stub:$PATH" TERM=xterm script -qec "bash '$REPO_ROOT/bxn' status" /dev/null
+  ) || true
+  assert_eq "an abandoned build: space doesn't start it" "" "$(cat "$stub/calls" 2>/dev/null)"
+  if [[ "$out" == *"gamma's build didn't finish"* ]]; then said=yes; else said=no; fi
+  assert_eq "an abandoned build: says why" "yes" "$said"
 
   # S force-stops the selected instance. It does nothing to one that's
   # already stopped, and it still works while that instance's graceful

@@ -17,6 +17,8 @@ BOXEN_CONFIG_DIR="${BOXEN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/boxen}"
 EGRESS_APPROVED="$BOXEN_CONFIG_DIR/egress-approved-baseline.txt"
 EGRESS_USER_HOSTS="$BOXEN_CONFIG_DIR/egress-baseline.txt"
 EGRESS_SHIPPED="$SCRIPT_DIR/egress/baseline.txt"
+# shellcheck source=boxen.build
+source "$SCRIPT_DIR/boxen.build"
 
 # The egress container for a group: the default one, or boxen-egress-<group>.
 # Usage: egress_name [<group>]
@@ -579,20 +581,13 @@ egress_converge() {
 
 # --- New containers ----------------------------------------------------------
 
-egress_boot_id() {
-  cat /proc/sys/kernel/random/boot_id 2>/dev/null || sysctl -n kern.boottime 2>/dev/null | tr -cd '0-9' || echo unknown
-}
+egress_boot_id() { boxen_boot_id; }
 
 # A build is abandoned when the bxn -c that started it has exited or the
-# host has rebooted since, so a status check never stops a healthy one.
+# host has rebooted since, so a status check never stops a healthy one
+# (boxen.build).
 egress_build_abandoned() {
-  local build b pid
-  build="$(incus config get "$1" user.boxen.egress.build 2>/dev/null)"
-  [[ -n "$build" && "$build" != done ]] || return 1
-  b="$(incus config get "$1" user.boxen.egress.builder 2>/dev/null)"
-  pid="${b%%@*}"
-  [[ "${b#*@}" != "$(egress_boot_id)" ]] && return 0
-  ! kill -0 "$pid" 2>/dev/null
+  [[ "$(build_state "$1")" == abandoned ]]
 }
 
 # Records the hosts the selected plugins need, as the container's plugin

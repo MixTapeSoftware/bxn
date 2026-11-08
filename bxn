@@ -26,6 +26,8 @@ log()   { echo -e "${GREEN}[+]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
 # shellcheck source=boxen.names
 source "$SCRIPT_DIR/boxen.names"
+# shellcheck source=boxen.build
+source "$SCRIPT_DIR/boxen.build"
 
 # A command's container from what was typed: bxn web finds chad-claude-web
 # (boxen.names). Replaces the first argument that isn't a flag; the result is
@@ -182,22 +184,40 @@ cmd_update() {
   log "Updated $container"
 }
 
+# Every run leaves a record for the login notice (cmd_notify_snippet), also
+# one that stops partway: incus missing from cron's PATH, a container that
+# won't start or stop.
 cmd_update_all() {
-  local containers
+  local containers failed=() logfile name status was_running attempts why
+  ensure_log_dir
+  logfile="$BOXEN_LOG_DIR/update-$(date +%Y%m%d-%H%M%S).log"
+  trap 'write_status failed "the run stopped before it finished; run bxn -ua to see why"' EXIT
   containers=$(incus list user.managed-by=boxen --format csv --columns ns 2>/dev/null) || {
     error "Failed to list containers"
   }
   if [[ -z "$containers" ]]; then
+    trap - EXIT
     echo "No incus-init managed containers found"
+    # Nothing failed: an older failure is no longer news.
+    write_status ok
     return
   fi
 
-  ensure_log_dir
-  local failed=()
-  local logfile="$BOXEN_LOG_DIR/update-$(date +%Y%m%d-%H%M%S).log"
-
   while IFS=, read -r name status; do
-    local was_running=0
+    was_running=0
+    # Not while its build runs (apt would race the build's for the dpkg
+    # lock), nor one whose build was abandoned (boxen.build).
+    case "$(build_state "$name")" in
+      running)
+        log "Skipping $name: it's still being built"
+        continue
+        ;;
+      abandoned)
+        echo "  ⚠️  Skipping $name: its build didn't finish. Delete it: bxn rm $name" >&2
+        failed+=("$name")
+        continue
+        ;;
+    esac
     if [[ "$status" == "RUNNING" ]]; then
       was_running=1
     elif behind_barrier "$name"; then
@@ -206,38 +226,44 @@ cmd_update_all() {
       continue
     else
       log "Starting $name..."
-      incus start "$name"
+      if ! incus start "$name"; then
+        echo "  ⚠️  Could not start $name" >&2
+        failed+=("$name")
+        continue
+      fi
       # Wait for container to be ready
-      local attempts=0
-      while true; do
-        if timeout 5 incus exec "$name" -- true </dev/null &>/dev/null; then
-          break
-        fi
+      attempts=0
+      while ! timeout 5 incus exec "$name" -- true </dev/null &>/dev/null; do
         sleep 1
         attempts=$((attempts + 1))
         if [[ $attempts -ge 30 ]]; then
           echo "  ⚠️  Timed out waiting for $name" >&2
           failed+=("$name")
+          # It was stopped before this run: leave it that way.
+          incus stop "$name" --force >/dev/null 2>&1 || echo "  ⚠️  Could not stop $name again" >&2
           continue 2
         fi
       done
     fi
+    why=""
     if ! is_debian "$name"; then
       echo "  ⚠️  WARNING: $name is tagged as boxen but is not Debian/Ubuntu — skipping update"
-      [[ "$was_running" == "0" ]] && incus stop "$name"
-      continue
-    fi
-    log "Updating $name..."
-    if ! cmd_update "$name" "$logfile"; then
-      failed+=("$name")
+    else
+      log "Updating $name..."
+      cmd_update "$name" "$logfile" || why=update
     fi
     # Only stop containers that were stopped before we started
     if [[ "$was_running" == "0" ]]; then
       log "Stopping $name..."
-      incus stop "$name"
+      if ! incus stop "$name"; then
+        echo "  ⚠️  Could not stop $name" >&2
+        why=stop
+      fi
     fi
+    [[ -z "$why" ]] || failed+=("$name")
   done < <(echo "$containers")
 
+  trap - EXIT
   echo ""
   if [[ ${#failed[@]} -gt 0 ]]; then
     echo "⚠️  Failed: ${failed[*]}"
@@ -274,6 +300,9 @@ cmd_set_env() {
   if [[ "$status" != "RUNNING" ]]; then
     behind_barrier "$container" &&
       error "$container is partway through turning its allowlist on, so it stays stopped. Finish it: bxn egress refresh $container"
+    local why
+    why="$(build_unstartable "$container")"
+    [[ -z "$why" ]] || error "$why"
     log "Starting $container..."
     incus start "$container"
     local attempts=0
@@ -762,7 +791,7 @@ status_interactive() {
   local color=true host json="[]" listed sample='{"t":0,"cpu":{}}' prev at=null
   local names=() states=() count=0 sel=0 sel_name="" hl i
   local pending="" still msg="" fetch=true last=-1 jobs=0
-  local key rc rest line out table tagged keys name state verb log_file p_verb p_name p_log err
+  local key rc rest line out table tagged keys name state verb log_file p_verb p_name p_log err why
   local busy="" modes=() md
   local egs=() trans=() mgds=() roles=() eg tr mgd role tab=info tabs_n=1 rsel=0 tab_rows=() tab_for="" tab_at=0 ask="" ask_args=() ask_desc="" r
   local frame=() size term_rows term_cols msg_lines wide focus=list top=0 rtop=0
@@ -1152,6 +1181,14 @@ status_interactive() {
         if [[ $verb == start && "${trans[$sel]}" != none ]]; then
           msg=$(status_note "$msg" "$name is partway through turning its allowlist on; finish it: bxn egress refresh $name")
           continue
+        fi
+        # A build that isn't done (boxen.build).
+        if [[ $verb == start ]]; then
+          why=$(build_unstartable "$name")
+          if [[ -n "$why" ]]; then
+            msg=$(status_note "$msg" "$why")
+            continue
+          fi
         fi
         status_job "$verb" "$name" incus "$verb" "$name"
         if [[ $verb == stop ]]; then line="Stopping $name…"; else line="Starting $name…"; fi
