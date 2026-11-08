@@ -53,10 +53,12 @@ Options:
   --colima-cpus N           Colima VM CPUs (default: 4, macOS only)
   --colima-memory N         Colima VM memory in GB (default: 8, macOS only)
   --colima-disk N           Colima VM disk in GB (default: 100, macOS only)
-  --vm                      Provision a KVM virtual machine instead of a container
+  --container               Provision a system container instead of a KVM virtual
+                            machine (the default)
+  --vm                      Provision a KVM virtual machine (the default)
   --no-copy                 Start with an empty workspace instead of copying the host directory
   --memory SIZE             Memory limit, e.g. 8GiB (default: the boxen profile's
-                            6GB for a container, 4GiB for a VM; a selected plugin
+                            4GiB for a VM, 6GB for a container; a selected plugin
                             can raise it). Refused when the host can't back it
   --vm-disk SIZE            VM root disk size (default: 20GiB)
   --vm-memory SIZE          Same as --memory
@@ -277,7 +279,10 @@ NO_TUI=0
 SAVE_TEMPLATE=0
 TS_STATE_BACKUP=""
 ACK_ENV=0
-IS_VM=0
+# A VM unless --container, or a container template, says otherwise. TYPE_FLAG
+# is the flag given (vm, container), empty for none.
+IS_VM=1
+TYPE_FLAG=""
 NO_COPY=0
 PATH_GIVEN=0
 # A repository to clone into the workspace (bxn create <project> <url>), as
@@ -1391,7 +1396,11 @@ while [[ $# -gt 0 ]]; do
     --colima-cpus)   [[ $# -lt 2 ]] && error "$1 requires an argument"; COLIMA_CPUS="$2"; shift 2 ;;
     --colima-memory) [[ $# -lt 2 ]] && error "$1 requires an argument"; COLIMA_MEMORY="$2"; shift 2 ;;
     --colima-disk)   [[ $# -lt 2 ]] && error "$1 requires an argument"; COLIMA_DISK="$2"; shift 2 ;;
-    --vm)            IS_VM=1; shift ;;
+    --vm|--container)
+      [[ -z "$TYPE_FLAG" || "--$TYPE_FLAG" == "$1" ]] || error "--vm and --container can't both be given"
+      TYPE_FLAG="${1#--}"
+      if [[ "$TYPE_FLAG" == vm ]]; then IS_VM=1; else IS_VM=0; fi
+      shift ;;
     --no-copy)       NO_COPY=1; shift ;;
     --vm-disk)       [[ $# -lt 2 ]] && error "$1 requires an argument"; VM_DISK="$2"; VM_OPT_SET=1; shift 2 ;;
     --memory|--vm-memory) [[ $# -lt 2 ]] && error "$1 requires an argument"; MEMORY="$2"; shift 2 ;;
@@ -1512,13 +1521,16 @@ if [[ "$BASE_IMAGE" == incus-init/* || "$BASE_IMAGE" == local:incus-init/* ]]; t
     error "Template image '$BASE_IMAGE' not found. Run 'incus image list' to see available templates."
   fi
   # Local templates are single-type: a VM template can't launch as a container
-  # and vice-versa. A VM template implies --vm; a container template given --vm
-  # fails here with a clear message instead of a cryptic one mid-launch.
+  # and vice-versa. With no --vm or --container the template's type decides; a
+  # flag that contradicts it fails here with a clear message instead of a
+  # cryptic one mid-launch.
   _img_type="$(incus image info "$BASE_IMAGE" 2>/dev/null | awk -F': ' '/^Type:/{print $2; exit}')"
-  if [[ "$IS_VM" == "1" && "$_img_type" == "container" ]]; then
-    error "Template '$BASE_IMAGE' is a container image; drop --vm or rebuild it with --vm."
-  elif [[ "$IS_VM" == "0" && "$_img_type" == "virtual-machine" ]]; then
-    log "Template '$BASE_IMAGE' is a VM image; launching as a VM"
+  if [[ "$_img_type" == "container" ]]; then
+    [[ "$TYPE_FLAG" != vm ]] || error "Template '$BASE_IMAGE' is a container image; drop --vm, or rebuild the template as a VM."
+    [[ -n "$TYPE_FLAG" ]] || log "Template '$BASE_IMAGE' is a container image; launching as a container"
+    IS_VM=0
+  elif [[ "$_img_type" == "virtual-machine" ]]; then
+    [[ "$TYPE_FLAG" != container ]] || error "Template '$BASE_IMAGE' is a VM image; drop --container, or rebuild the template with --container."
     IS_VM=1
   fi
   log "Using local template: $BASE_IMAGE"
@@ -1530,7 +1542,7 @@ if [[ "$IS_VM" == "1" ]]; then
   [[ "$VM_CPUS" =~ ^[1-9][0-9]*$ ]] || error "--vm-cpus must be a positive integer (got: $VM_CPUS)"
   READY_TIMEOUT=90
 elif [[ "$VM_OPT_SET" == "1" ]]; then
-  warn "VM options (--vm-disk/--vm-cpus) are ignored without --vm"
+  warn "VM options (--vm-disk/--vm-cpus) are ignored for a container"
 fi
 
 HOST_USER="$(whoami)"
