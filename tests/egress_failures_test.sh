@@ -131,6 +131,27 @@ fi
 rm -f "$BOXEN_CONFIG_DIR/egress-baseline.txt"
 run refresh box
 
+echo "a narrowed list whose settings can't be read"
+run rm box api.anthropic.com
+assert_eq "box no longer allows a removed baseline host" no "$(allows box api.anthropic.com)"
+good_gen="$(gen_of box)"
+FAKE_INCUS_FAIL_CALL='^config get box user.boxen.egress.deny$' run refresh box
+assert_eq "refresh fails when the removed list can't be read" "1" "$RC"
+assert_eq "and keeps the narrower policy" "$good_gen" "$(gen_of box)"
+assert_eq "so the removed host stays blocked" no "$(allows box api.anthropic.com)"
+FAKE_INCUS_FAIL_CALL='^config get box user.boxen.egress.deny$' run ls box
+assert_eq "ls of the container fails too" "1" "$RC"
+run allow box api.anthropic.com
+run baseline box off
+assert_eq "with the baseline off, box drops its hosts" no "$(allows box api.anthropic.com)"
+good_gen="$(gen_of box)"
+FAKE_INCUS_FAIL_CALL='^config get box user.boxen.egress.baseline$' run refresh box
+assert_eq "refresh fails when the baseline setting can't be read" "1" "$RC"
+assert_eq "and keeps the narrower policy" "$good_gen" "$(gen_of box)"
+assert_eq "so the baseline stays out" no "$(allows box api.anthropic.com)"
+run baseline box on
+assert_eq "turning it back on restores the host" yes "$(allows box api.anthropic.com)"
+
 echo "a container list that can't be read under the lock"
 # The first list, for the question, works; the second, under the lock, fails.
 mv "$SANDBOX/bin/incus" "$SANDBOX/bin/incus.real"
