@@ -51,7 +51,7 @@ egress_read_hosts() {
   [[ -f "$file" ]] || return 0
   norm="$(awk '{ sub(/#.*/, ""); sub(/^[ \t\r]+/, ""); sub(/[ \t\r]+$/, ""); if ($0 == "") next
                  $0 = tolower($0); sub(/\.$/, ""); if (length($0) > 253) $0 = "!" $0
-                 print NR "\t" $0 }' "$file")"
+                 print NR "\t" $0 }' "$file")" || error "Could not read $file"
   [[ -n "$norm" ]] || return 0
   bad="$(grep -vE "^[0-9]+	$EGRESS_HOST_RE\$" <<< "$norm" | head -1 || true)"
   [[ -z "$bad" ]] || error "$file line ${bad%%	*}: not a hostname bxn accepts: ${bad#*	}"
@@ -74,16 +74,27 @@ egress_ensure_approved() {
 
 # Every host an agent may reach, sorted: the approved baseline, the user's
 # additions, the plugins' additions recorded on the agent, and the agent's own.
+# Fails when any part can't be read, such as a list with a bad line: a policy
+# built from the rest would drop hosts without a word. Callers check, since
+# error() inside $(...) ends only that subshell.
 # Usage: egress_hosts <agent>
 egress_hosts() {
-  local agent="$1"
+  local agent="$1" approved user plugins own
   egress_ensure_approved
-  {
-    egress_read_hosts "$EGRESS_APPROVED"
-    egress_read_hosts "$EGRESS_USER_HOSTS"
-    egress_split "$(incus config get "$agent" user.boxen.egress.plugin-allow 2>/dev/null)"
-    egress_split "$(incus config get "$agent" user.boxen.egress.allow 2>/dev/null)"
-  } | LC_ALL=C sort -u
+  approved="$(egress_read_hosts "$EGRESS_APPROVED")" || return 1
+  user="$(egress_read_hosts "$EGRESS_USER_HOSTS")" || return 1
+  plugins="$(incus config get "$agent" user.boxen.egress.plugin-allow 2>/dev/null)" || return 1
+  own="$(incus config get "$agent" user.boxen.egress.allow 2>/dev/null)" || return 1
+  { printf '%s\n' "$approved" "$user"; egress_split "$plugins"; egress_split "$own"; } |
+    sed '/^$/d' | LC_ALL=C sort -u
+}
+
+# The policy identity of an agent's hosts under a mode, or a failure.
+# Usage: egress_hosts_id <agent> <mode>
+egress_hosts_id() {
+  local hosts
+  hosts="$(egress_hosts "$1")" || return 1
+  printf '%s\n' "$hosts" | egress_policy_id "$2"
 }
 
 egress_sha256() {
@@ -309,7 +320,7 @@ egress_apply() {
   mode="$(incus config get "$agent" user.boxen.egress 2>/dev/null)"
   mode="${mode:-enforce}"
   [[ "$(mode_rank "$mode")" -ge 0 ]] || error "$agent has an unknown egress mode: $mode"
-  hosts="$(egress_hosts "$agent")"
+  hosts="$(egress_hosts "$agent")" || error "Could not read $agent's hosts; its proxy stays as it is"
   id="$(printf '%s\n' "$hosts" | egress_policy_id "$mode")"
   cur="$(egress_ctl "$egress" status "$agent" </dev/null)" || error "Could not read $agent's proxy in $egress"
   if [[ "$(cut -f4 <<< "$cur")" == "$id" && "$(cut -f6 <<< "$cur")" == "yes" ]]; then
@@ -506,7 +517,15 @@ egress_clear_proxy_env() {
 # connection knows. A boot barrier keeps it from starting until the change
 # commits. Any step can be repeated; recovery replays them in order.
 
-egress_running() { [[ "$(incus list "^${1}$" --format csv --columns s 2>/dev/null)" == "RUNNING" ]]; }
+# An instance's status (RUNNING, STOPPED...), or a failure when it can't be read.
+egress_status() {
+  local st
+  st="$(incus list "^${1}$" --format csv --columns s 2>/dev/null)" || return 1
+  [[ -n "$st" ]] || return 1
+  echo "$st"
+}
+
+egress_running() { [[ "$(egress_status "$1" || true)" == "RUNNING" ]]; }
 
 # The transition, as "<mode>:<address>", or empty.
 egress_transition() {
@@ -539,12 +558,17 @@ egress_lockdown() {
     "user.boxen.egress.autostart-saved=$saved" boot.autostart=false >/dev/null ||
     error "Could not set $agent's boot barrier; nothing changed"
 
-  # 2. Stopped, and confirmed.
-  if egress_running "$agent"; then
+  # 2. Stopped, and confirmed: only an explicit STOPPED counts, since a
+  #    status that can't be read may be a running container.
+  local st
+  st="$(egress_status "$agent")" ||
+    error "Could not read $agent's status. It isn't locked yet; it won't start on its own. Retry: bxn egress refresh $agent"
+  if [[ "$st" != STOPPED ]]; then
     log "Stopping $agent to end its open connections..."
     incus stop "$agent" --timeout 30 >/dev/null 2>&1 || incus stop "$agent" --force >/dev/null 2>&1 || true
+    st="$(egress_status "$agent")" || st=""
   fi
-  egress_running "$agent" &&
+  [[ "$st" == STOPPED ]] ||
     error "Could not confirm $agent stopped. It isn't locked yet; it won't start on its own. Retry: bxn egress refresh $agent"
 
   # 3. The restrictive card rules. 4. No old proxy generation left.
@@ -583,15 +607,15 @@ egress_commit() {
 # and proxy already match the target is committed; anything else is replayed
 # from the start, which stops it first.
 egress_recover() {
-  local agent="$1" t mode ip egress st
+  local agent="$1" t mode ip egress st id
   t="$(egress_transition "$agent")"
   [[ -n "$t" ]] || return 0
   mode="${t%%:*}" ip="${t#*:}"
   egress="$(incus config get "$agent" user.boxen.egress.container)"
   if egress_running "$agent" && egress_nic_is_restricted "$agent" && [[ "$(egress_ip "$agent")" == "$ip" ]]; then
     st="$(egress_ctl "$egress" status "$agent" </dev/null 2>/dev/null)" || st=""
-    if [[ "$(cut -f5 <<< "$st")" == "$mode" && "$(cut -f6 <<< "$st")" == "yes" &&
-          "$(cut -f4 <<< "$st")" == "$(egress_hosts "$agent" | egress_policy_id "$mode")" ]]; then
+    id="$(egress_hosts_id "$agent" "$mode")" || error "Could not read $agent's hosts; it isn't committed"
+    if [[ "$(cut -f5 <<< "$st")" == "$mode" && "$(cut -f6 <<< "$st")" == "yes" && "$(cut -f4 <<< "$st")" == "$id" ]]; then
       log "$agent is locked and its proxy is verified; finishing"
       egress_commit "$agent"
       return 0
@@ -685,8 +709,8 @@ egress_prepare_unstarted() {
   egress_register "$agent" "$egress"
   incus config set "$agent" "user.boxen.egress=$mode" >/dev/null
   egress_nic_restrict "$agent"
+  # egress_apply records what it applied.
   egress_apply "$agent" >/dev/null || error "Could not start $agent's proxy"
-  incus config set "$agent" "user.boxen.egress.active=$mode:$(egress_hosts "$agent" | egress_policy_id "$mode")" >/dev/null
 }
 
 # What the user and the agent see in a locked container: a login banner and a

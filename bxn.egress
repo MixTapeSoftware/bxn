@@ -76,10 +76,13 @@ need_container() {
   incus info "$c" &>/dev/null || error "Container not found: $c"
 }
 
-# Containers with an allowlist proxy.
+# Containers with an allowlist proxy. Fails when they can't be listed, so a
+# bulk change never reads a failed list as no containers.
 allowlisted() {
-  local c
-  for c in $(incus list user.managed-by=boxen --format csv --columns n 2>/dev/null); do
+  local c names
+  names="$(incus list user.managed-by=boxen --format csv --columns n 2>/dev/null)" ||
+    error "Could not list the containers"
+  for c in $names; do
     [[ -n "$(incus config get "$c" user.boxen.egress.container 2>/dev/null)" ]] && echo "$c"
   done
   return 0
@@ -129,13 +132,20 @@ say_result() {
 }
 
 converge_one() {
-  local c="$1" r
+  local c="$1" r was now
+  was="$(incus config get "$c" user.boxen.egress.active 2>/dev/null)" || was=""
   r="$(egress_converge "$c" "$FORCE")" || { warn "$c: the change didn't go through"; return 1; }
+  now="$(incus config get "$c" user.boxen.egress.active 2>/dev/null)" || now=""
+  # A mode can change on any command that converges: one that a stricter
+  # `mode` recorded but couldn't apply. Say so before the last line.
+  if [[ -n "$was" && -n "$now" && "${was%%:*}" != "${now%%:*}" ]]; then
+    log "$c: now ${now%%:*} (was ${was%%:*})"
+  fi
   say_result "$c" "$r"
 }
 
 cmd_mode() {
-  local c="${1:-}" mode="${2:-}" group=""
+  local c="${1:-}" mode="${2:-}" group="" old
   shift 2 || usage 1
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -147,19 +157,33 @@ cmd_mode() {
   case "$mode" in enforce | report | off) ;; *) usage 1 ;; esac
   boxen_lock
   attach "$c" "$group"
-  incus config set "$c" "user.boxen.egress=$mode" >/dev/null
-  converge_one "$c" || { boxen_unlock; return 1; }
+  old="$(incus config get "$c" user.boxen.egress 2>/dev/null)" || error "Could not read $c's mode"
+  incus config set "$c" "user.boxen.egress=$mode" >/dev/null || error "Could not record $c's mode"
+  if ! converge_one "$c"; then
+    # A looser mode that didn't go through isn't kept, or the next allow, rm
+    # or refresh would apply it unasked. A stricter one is kept: the next
+    # converge finishes it, and until then nothing is looser than before.
+    if [[ -n "$old" ]] && (( $(mode_rank "$mode") > $(mode_rank "$old") )); then
+      incus config set "$c" "user.boxen.egress=$old" >/dev/null ||
+        error "Could not put $c's mode back to $old. Set it: bxn egress mode $c $old"
+      warn "$c stays $old. Retry: bxn egress mode $c $mode"
+    fi
+    boxen_unlock
+    return 1
+  fi
   boxen_unlock
 }
 
 # Usage: edit_hosts add|rm <container> <host>...
 edit_hosts() {
-  local op="$1" c="$2" h list="" out=() keep
+  local op="$1" c="$2" h list="" out=() keep all
   shift 2
   [[ $# -gt 0 ]] || usage 1
   for h in "$@"; do
     out+=("$(egress_host "$h")") || error "Not a hostname bxn accepts: $h"
   done
+  # Nothing is recorded when the lists can't be read: no change could apply.
+  egress_hosts "$c" >/dev/null || error "Could not read $c's hosts; nothing changed"
   list="$(egress_split "$(incus config get "$c" user.boxen.egress.allow 2>/dev/null)")"
   if [[ "$op" == add ]]; then
     list="$(printf '%s\n' "$list" "${out[@]}" | sed '/^$/d' | LC_ALL=C sort -u)"
@@ -172,8 +196,9 @@ edit_hosts() {
   keep="$(printf '%s\n' "$list" | sed '/^$/d' | tr '\n' ',' | sed 's/,$//')"
   incus config set "$c" "user.boxen.egress.allow=$keep" >/dev/null
   if [[ "$op" == rm ]]; then
+    all="$(egress_hosts "$c")" || error "Could not read $c's hosts"
     for h in "${out[@]}"; do
-      if egress_hosts "$c" | grep -qxF -- "$h"; then
+      if grep -qxF -- "$h" <<< "$all"; then
         warn "$h is still allowed for $c by $(host_source "$c" "$h")"
       fi
     done
@@ -181,14 +206,19 @@ edit_hosts() {
 }
 
 # Each host a container may reach, a tab, and where it comes from.
+# Fails, as egress_hosts does, when a part can't be read.
 hosts_with_sources() {
-  local c="$1"
+  local c="$1" approved user plugins own
   egress_ensure_approved
+  approved="$(egress_read_hosts "$EGRESS_APPROVED")" || return 1
+  user="$(egress_read_hosts "$EGRESS_USER_HOSTS")" || return 1
+  plugins="$(incus config get "$c" user.boxen.egress.plugin-allow 2>/dev/null)" || return 1
+  own="$(incus config get "$c" user.boxen.egress.allow 2>/dev/null)" || return 1
   {
-    egress_read_hosts "$EGRESS_APPROVED" | sed 's/$/	baseline/'
-    egress_read_hosts "$EGRESS_USER_HOSTS" | sed 's/$/	your additions/'
-    egress_split "$(incus config get "$c" user.boxen.egress.plugin-allow 2>/dev/null)" | sed 's/$/	plugins/'
-    egress_split "$(incus config get "$c" user.boxen.egress.allow 2>/dev/null)" | sed "s/\$/\t$c/"
+    printf '%s\n' "$approved" | sed '/^$/d; s/$/	baseline/'
+    printf '%s\n' "$user" | sed '/^$/d; s/$/	your additions/'
+    egress_split "$plugins" | sed 's/$/	plugins/'
+    egress_split "$own" | sed "s/\$/\t$c/"
   } | awk -F'\t' '!($1 in s) { order[++n] = $1; s[$1] = $2; next } { s[$1] = s[$1] ", " $2 }
                    END { for (i = 1; i <= n; i++) print order[i] "\t" s[order[i]] }' | LC_ALL=C sort
 }
@@ -228,6 +258,7 @@ all_hosts() {
   shift
   [[ $# -gt 0 ]] || usage 1
   for h in "$@"; do out+=("$(egress_host "$h")") || error "Not a hostname bxn accepts: $h"; done
+  # For the question only: a container can get an allowlist while it waits.
   cs="$(allowlisted | tr '\n' ' ')"
   if [[ "$op" == add ]]; then
     confirm "Allow ${out[*]} for every container (${cs:-none yet})?" || error "Nothing changed"
@@ -236,7 +267,7 @@ all_hosts() {
   fi
   boxen_lock
   mkdir -p "$BOXEN_CONFIG_DIR"
-  list="$(egress_read_hosts "$EGRESS_USER_HOSTS")"
+  list="$(egress_read_hosts "$EGRESS_USER_HOSTS")" || { boxen_unlock; error "Nothing changed"; }
   if [[ "$op" == add ]]; then
     list="$(printf '%s\n' "$list" "${out[@]}" | sed '/^$/d' | LC_ALL=C sort -u)"
   else
@@ -249,13 +280,17 @@ all_hosts() {
   { echo "# Your additions to the egress baseline, for every container. Managed by bxn egress allow/rm --all."
     printf '%s\n' "$list" | sed '/^$/d'; } > "$EGRESS_USER_HOSTS.new"
   mv "$EGRESS_USER_HOSTS.new" "$EGRESS_USER_HOSTS"
+  # Listed again under the lock, after the write: any container locked since
+  # the question was asked has the old list, and converges here too.
+  cs="$(allowlisted)" ||
+    { boxen_unlock; error "Your additions changed, but no container got them. Retry: bxn egress refresh --all"; }
   for c in $cs; do converge_one "$c" || failed="$failed $c"; done
   boxen_unlock
   [[ -z "$failed" ]] || error "Changes did not finish for:$failed. Retry: bxn egress refresh --all"
 }
 
 cmd_ls() {
-  local c="${1:-}" egress mode active port h
+  local c="${1:-}" egress mode active port h cs
   if [[ "${2:-}" == "--tsv" ]]; then
     need_container "$c"
     if [[ "${3:-}" == "--applied" ]]; then
@@ -282,23 +317,28 @@ cmd_ls() {
     hosts_with_sources "$c" | awk -F'\t' '{ printf "%-50s  %s\n", $1, $2 }'
     return 0
   fi
+  # Listed first: a failed list in a for loop's words would print nothing
+  # and exit 0, as if no container had an allowlist.
+  cs="$(allowlisted)" || exit 1
   printf '%-28s %-8s %-18s %-22s %s\n' CONTAINER MODE ACTIVE PROXY NOTES
-  for c in $(allowlisted); do status_line "$c"; done
+  for c in $cs; do status_line "$c"; done
   ufw_note
 }
 
 # One line: name, desired mode, active state, proxy and anything to fix.
 status_line() {
-  local c="$1" egress mode active port notes="" st
+  local c="$1" egress mode active port notes="" st id
   egress="$(incus config get "$c" user.boxen.egress.container)"
   mode="$(incus config get "$c" user.boxen.egress 2>/dev/null)"; mode="${mode:-enforce}"
   active="$(incus config get "$c" user.boxen.egress.active 2>/dev/null)"
   port="$(incus config get "$c" user.boxen.egress.port 2>/dev/null)"
   [[ -n "$(egress_transition "$c")" ]] && notes+="change interrupted: bxn egress refresh $c; "
   egress_build_abandoned "$c" && notes+="build abandoned ($(incus config get "$c" user.boxen.egress.build)): rebuild or delete it; "
+  id="$(egress_hosts_id "$c" "$mode" 2>/dev/null)" ||
+    { id=""; notes+="can't read its host lists (bxn egress ls $c says why); "; }
   if [[ "${active%%:*}" != "$mode" ]]; then
     notes+="wants $mode: bxn egress refresh $c; "
-  elif [[ "${active#*:}" != "$(egress_hosts "$c" | egress_policy_id "$mode")" ]]; then
+  elif [[ -n "$id" && "${active#*:}" != "$id" ]]; then
     notes+="hosts changed since applied: bxn egress refresh $c; "
   fi
   if [[ "$mode" != off ]] && ! egress_nic_is_restricted "$c"; then notes+="card not locked; "; fi
