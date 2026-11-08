@@ -92,7 +92,7 @@ def rc_class(rc: int) -> str:
 class Fault:
     """One injected fault for one command, as fake_systemd knobs."""
 
-    kind: str = "none"  # none curl_late die_check die_gen start_fail no_ack stuck
+    kind: str = "none"  # none curl_late die_check die_gen die_kill start_fail no_ack stuck
     agent: str = ""
     gen: int = 0
     signal: str = "KILL"
@@ -106,6 +106,8 @@ class Fault:
             return {"FAKE_SYSTEMD_DIE_AFTER": cu, "FAKE_SYSTEMD_DIE_SIGNAL": self.signal}
         if self.kind == "die_gen":
             return {"FAKE_SYSTEMD_DIE_AFTER": gu, "FAKE_SYSTEMD_DIE_SIGNAL": self.signal}
+        if self.kind == "die_kill":
+            return {"FAKE_SYSTEMD_DIE_ON_KILL": gu, "FAKE_SYSTEMD_DIE_SIGNAL": self.signal}
         if self.kind == "start_fail":
             return {"FAKE_SYSTEMD_START_FAIL": gu}
         if self.kind == "no_ack":
@@ -248,8 +250,13 @@ class Model:
             if n not in A.running:
                 A.stopping = None
             return FAIL
+        # The one that was current accepts until its SIGTERM, so it's recorded.
+        A.stopping = frozenset([n] + ([A.current] if A.current is not None else []))
         A.current = n
-        self._sigterm(a, old)
+        for g in old:
+            if f.is_("die_kill", a, g):
+                return KILLED
+            self._sigterm(a, [g])
         A.stopping = None
         return OK
 
@@ -699,10 +706,13 @@ class EgressCtl(RuleBasedStateMachine):
         kind = data.draw(st.sampled_from(kinds), label="fault")
         if not faulty:
             return NONE
-        if kind == "stuck":
+        if kind in ("stuck", "die_kill"):
             A = self.model.agents.get(a)
             choices = sorted(set(A.running) | {n}) if A else [n]
-            return Fault("stuck", a, pick(data, choices, "stuck gen"))
+            g = pick(data, choices, f"{kind} gen")
+            if kind == "stuck":
+                return Fault("stuck", a, g)
+            return Fault(kind, a, g, data.draw(signals, label="signal"))
         sig = data.draw(signals, label="signal") if kind.startswith("die") else "KILL"
         return Fault(kind, a, n, sig)
 
@@ -727,7 +737,7 @@ class EgressCtl(RuleBasedStateMachine):
 
     def _widen(self, g, force, data):
         a, n = g
-        f = self._fault(data, a, n, ["curl_late", "die_check", "die_gen", "start_fail", "no_ack", "stuck"])
+        f = self._fault(data, a, n, ["curl_late", "die_check", "die_gen", "die_kill", "start_fail", "no_ack", "stuck"])
         want = self.model.widen(a, n, force, f)
         rc, out, err = self._run(("widen", a, n, force), f)
         self._expect(f"widen {a} {n} force={force} {f}", want, rc, out, err)
@@ -1024,8 +1034,11 @@ class EgressCtl(RuleBasedStateMachine):
             if c is not None:
                 mode, pol, _ = self.sb.gen_info(a, c)
                 if c in run:
-                    st_ = self.sb.stopping(a) or frozenset()
-                    listening = "stopping" if any(g != c and g in st_ for g in run) else "yes"
+                    listening = "yes"
+            # A leftover a change should have ended is reported whatever current is.
+            st_ = self.sb.stopping(a) or frozenset()
+            if any(g != c and g in st_ for g in run):
+                listening = "stopping"
             port = (self.sb.read(self.sb.agent_dir(a), "port") or "").strip()
             want = [a, port, str(c) if c is not None else "none", pol, mode, listening, " ".join(map(str, run))]
             assert line.split("\t") == want, f"status line {line.split(chr(9))} != disk {want}"

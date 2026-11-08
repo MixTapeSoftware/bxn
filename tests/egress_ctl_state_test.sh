@@ -225,6 +225,35 @@ assert_eq "a widen that doesn't start fails" "1" "$RC"
 assert_eq "and leaves status settled" "yes" "$(listening a)"
 assert_eq "with no record left" "no" "$([[ -f "$S/etc/agents/a/stopping" ]] && echo yes || echo no)"
 
+echo "a widen cut short after current moves, before the old one is signalled"
+fresh
+ctl add a 4750
+gen a enforce 1111aaaa h1.example.com >/dev/null
+ctl widen a 1
+gen a enforce 2222bbbb h1.example.com wide.example.com >/dev/null
+FAKE_SYSTEMD_DIE_ON_KILL='boxen-gen_a@1.service' run widen a 2
+assert_eq "current has moved" "2" "$(ctl status a | cut -f3)"
+assert_eq "the old one still accepts" "active" "$(unit_state 'boxen-gen_a@1.service')"
+assert_eq "so status doesn't call it settled" "stopping" "$(listening a)"
+gen a enforce 3333cccc h1.example.com wide.example.com h3.example.com >/dev/null
+run widen a 3
+assert_eq "the next widen goes through" "0" "$RC"
+assert_eq "and stops it" "inactive" "$(unit_state 'boxen-gen_a@1.service')"
+assert_eq "status is settled" "yes" "$(listening a)"
+
+echo "a first widen cut short after its generation starts"
+fresh
+ctl add a 4750
+gen a enforce 1111aaaa h1.example.com >/dev/null
+FAKE_SYSTEMD_DIE_AFTER='boxen-gen_a@1.service' run widen a 1
+assert_eq "nothing is current" "none" "$(ctl status a | cut -f3)"
+assert_eq "but it runs, and status says so" "stopping" "$(listening a)"
+gen a enforce 2222bbbb h1.example.com >/dev/null
+run widen a 2
+assert_eq "the host's retry goes through" "0" "$RC"
+assert_eq "and stops the leftover" "2" "$(active_gens a)"
+assert_eq "status is settled" "yes" "$(listening a)"
+
 echo "a tighten whose old generation won't stop"
 serving_wide
 FAKE_SYSTEMD_STUCK='boxen-gen_a@1.service' run tighten a 2

@@ -21,18 +21,21 @@
 #                             $FAKE_SYSTEMD/hold-starting first
 #   FAKE_SYSTEMD_DIE_AFTER    a unit glob: once one starts, the caller is
 #                             killed with FAKE_SYSTEMD_DIE_SIGNAL (KILL)
+#   FAKE_SYSTEMD_DIE_ON_KILL  a unit glob: when one is sent a signal, the
+#                             caller is killed (FAKE_SYSTEMD_DIE_SIGNAL) first
 #   FAKE_SYSTEMD_STUCK        a unit glob that stop leaves running
 #   FAKE_SYSTEMD_START_FAIL   a unit glob whose start fails: the unit stays
 #                             inactive and start exits 1
-#   FAKE_SYSTEMD_NO_ACK       a unit glob that starts but never acks, as a
-#                             generation that never begins accepting
+#   FAKE_SYSTEMD_NO_ACK       a unit glob that starts but never acks; it
+#                             stays active, as one whose ack was lost may
+#                             well be accepting
 #   FAKE_CURL_LATE            the probe gets no answer and leaves no record
 set -uo pipefail
 F="${FAKE_SYSTEMD:?}"
 U="$F/units"
 # Builtins where they do, so a property test's thousands of calls stay quick.
 [[ -d "$U" ]] || mkdir -p "$U"
-[[ -f "$F/journal" ]] || : > "$F/journal"
+[[ -f "$F/journal" ]] || : >> "$F/journal"
 now() { echo "$(date +%s)000000"; }
 jr() { printf '%s\t%s\t%s\n' "$1" "$(now)" "$2" >> "$F/journal"; }
 st() { local s=inactive; [[ -f "$U/$1" ]] && read -r s _ < "$U/$1"; echo "$s"; }
@@ -84,6 +87,10 @@ systemctl_() {
       return 0 ;;
     kill)
       u="$(last_arg "$@")"
+      # shellcheck disable=SC2053
+      if [[ -n "${FAKE_SYSTEMD_DIE_ON_KILL:-}" && "$u" == $FAKE_SYSTEMD_DIE_ON_KILL ]]; then
+        kill -s "${FAKE_SYSTEMD_DIE_SIGNAL:-KILL}" "$PPID"; return 0
+      fi
       [[ "$(st "$u")" == active ]] && echo "draining $(pid_of "$u")" > "$U/$u"
       return 0 ;;
     is-active) running "$(last_arg "$@")" ;;

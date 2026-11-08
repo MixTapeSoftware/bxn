@@ -194,7 +194,7 @@ assert_contains "and its rule set too" "Network rule set boxen-a-gone belongs to
 echo stopping > "$FAKE_INCUS_STATE/ctl/boxen-egress/box/listening"
 doctor
 assert_eq "older proxies left by a narrowing fail" "1" "$RC"
-assert_contains "it says so" "box's proxy in boxen-egress didn't finish a change: a proxy it should have ended still runs with another allowlist" "$OUT"
+assert_contains "it says so" "box's proxy in boxen-egress didn't finish a change: a proxy it should have ended still runs with another policy" "$OUT"
 assert_not_contains "not as no internet" "isn't listening" "$OUT"
 rm "$FAKE_INCUS_STATE/ctl/boxen-egress/box/listening"
 

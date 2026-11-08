@@ -825,7 +825,7 @@ Without this, containers get an IPv6 address from Incus and prefer it (per RFC 6
 
 ## Tests
 
-Each `tests/*_test.sh` runs on its own with Bash and exits 0 when it passes: `for t in tests/*_test.sh; do bash "$t" || echo "FAILED: $t"; done`. They use fakes (`tests/lib/fake_incus`, `tests/lib/fake_systemd`), so they need no Incus. The scripts under `tests/host/` need real Incus or systemd; each says where to run it.
+Each `tests/*_test.sh` runs on its own with Bash and exits 0 when it passes. To run them all and exit nonzero if any fails: `rc=0; for t in tests/*_test.sh; do bash "$t" || { echo "FAILED: $t"; rc=1; }; done; [ "$rc" = 0 ]`. They use fakes (`tests/lib/fake_incus`, `tests/lib/fake_systemd`), so they need no Incus. The scripts under `tests/host/` need real Incus or systemd; each says where to run it.
 
 ### Property tests
 
@@ -837,4 +837,4 @@ BOXEN_PROPERTY_SEED=random BOXEN_PROPERTY_EXAMPLES=1000 \
   BOXEN_PROPERTY_STATS=1 bash tests/property_test.sh          # explore; failures are kept in .hypothesis/
 ```
 
-A failure prints the shortest sequence of commands that breaks an invariant. Turn it into an example in `tests/egress_ctl_state_test.sh` when it's a real bug.
+A failure prints the shortest sequence of commands it could find that breaks an invariant (unless `BOXEN_PROPERTY_SHRINK=0`, which reports it as found). Turn it into an example in `tests/egress_ctl_state_test.sh` when it's a real bug.

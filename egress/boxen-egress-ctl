@@ -20,9 +20,9 @@
 #   stop <agent>                     end every generation; nothing serves
 #   remove <agent>                   stop, then remove the agent's units
 #   status [<agent>]                 one line per agent; listening is yes, no,
-#                                    or stopping (a generation that a cut-short
-#                                    widen started, or older ones a tighten
-#                                    ended, still runs)
+#                                    or stopping (a generation a cut-short
+#                                    change should have ended still runs,
+#                                    whatever current is)
 #   hosts <agent>                    the hosts the current generation allows
 #   log <agent> [<since>]            decisions as TSV: time host port decision reason gen
 #   boot                             at boot: start each agent's current generation
@@ -402,7 +402,10 @@ cmd_widen() {
     die "widen $agent/$gen: it never started accepting, so it was stopped; $unchanged"
   fi
   # Only now do older generations stop taking new connections. They keep
-  # their open ones until those close or EXIT_TIMEOUT passes.
+  # their open ones until those close or EXIT_TIMEOUT passes. The one that
+  # was current accepts until its SIGTERM, so it's recorded first: cut short
+  # in between, status says stopping and the next command stops it.
+  set_stopping "$agent" "$gen $(current "$agent")"
   set_current "$agent" "$gen"
   for g in $old; do systemctl kill --kill-whom=main --signal=SIGTERM "$(gen_unit "$agent" "$g")" 2>/dev/null || true; done
   rm -f "$(stopping_file "$agent")"
@@ -483,8 +486,9 @@ cmd_status() {
       pol="$(cat "$(gen_dir "$agent" "$cur")/policy" 2>/dev/null || echo -)"
       mode="$(cat "$(gen_dir "$agent" "$cur")/mode" 2>/dev/null || echo -)"
       systemctl is-active --quiet "$(gen_unit "$agent" "$cur")" && listening=yes
-      [[ "$listening" == yes && -n "$(stopping_left "$agent")" ]] && listening=stopping
     fi
+    # Even with no current: a first widen cut short leaves its generation.
+    [[ -n "$(stopping_left "$agent")" ]] && listening=stopping
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$agent" "$(cat "$(agent_dir "$agent")/port")" "$cur" "$pol" "$mode" "$listening" \
       "$(gens_active "$agent" | tr '\n' ' ' | sed 's/ $//')"
   done
