@@ -7,7 +7,7 @@ How far a bxn container keeps a coding agent away from your machine, what it doe
 - **An unprivileged container.** Root inside the container is an ordinary user on the host, and each container gets its own range of user IDs (`security.idmap.isolated`), so two containers' users are never the same host user. Nesting is off, and memory and CPU are limited (6GB and 4 CPUs by default).
 - **Nothing from the host is mounted.** The workspace is a copy, `.git` included. Work leaves through git (see [Getting work out](README.md#getting-work-out)).
 - **No sudo** in a container by default.
-- **Network isolation.** A container can't reach other instances, services on the host, or private and LAN addresses. New containers are built on the [egress allowlist](README.md#egress-allowlist), which is enforced outside the container, so root inside it can't turn the allowlist off.
+- **Network isolation.** A container can't reach other instances, services on the host, or private and LAN addresses. By default, new containers are built on the [egress allowlist](README.md#egress-allowlist) under `enforce`. The allowlist is enforced outside the container, so root inside it can't turn it off. You can: `--egress report` logs instead of blocking, `--egress off` builds without it, and `--insecure-network` turns the isolation off too.
 - **A VM on request.** `--vm` gives the instance its own kernel.
 
 ## What remains
@@ -28,7 +28,7 @@ No sudo doesn't mean no way to root:
 - **Shell startup files.** Anything running as your user can edit `~/.zshrc` and the like. A later `bxn shell --with-sudo` session runs them, with sudo. Treat `--with-sudo` as handing root to whatever has run in the container.
 - **A build that didn't finish** may still have the sudo it uses while building. `bxn shell` warns about it, and `bxn doctor` lists it. Delete it with `bxn rm`.
 
-Root inside the container is still not root on the host, and the allowlist and network isolation stay in force. But root can change anything else inside the container.
+Root inside the container is still not root on the host. The container's network rules, whatever its egress mode, live outside it, so root can't change them. A build that didn't finish may not have its allowlist locked yet; `bxn doctor` lists one. But root can change anything else inside the container.
 
 ### Credentials in the container
 
