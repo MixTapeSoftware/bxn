@@ -186,7 +186,11 @@ template_cleanup_on_exit() {
     # The names only: the values never reach the terminal.
     warn "The $(saved_token_names) line(s) of $CONTAINER_NAME's ~/.zshenv were taken out for the publish and could not be put back. Set each again: bxn -e $CONTAINER_NAME <NAME>"
   fi
-  if [[ $rc -ne 0 && "${TEMPLATE_PUBLISHED:-0}" != "1" ]]; then
+  # A signal during the publish runs this once incus publish returns, maybe
+  # having published: the image says so. It didn't exist before the build
+  # (checked at the start), so it's this run's.
+  if [[ $rc -ne 0 && "${TEMPLATE_PUBLISHED:-0}" != "1" ]] &&
+     ! incus image info "incus-init/$CONTAINER_NAME" >/dev/null 2>&1; then
     warn "No template saved. $CONTAINER_NAME itself is finished and kept."
   fi
   exit "$rc"

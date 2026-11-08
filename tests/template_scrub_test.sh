@@ -311,6 +311,9 @@ for sig in TERM HUP; do
   OUT="$(cat "$SANDBOX/out")"
   assert_eq "SIG$sig during publish: the build stops" "$([[ $sig == TERM ]] && echo 143 || echo 129)" "$RC"
   assert_eq "SIG$sig during publish: the container is running again" "RUNNING" "$(cat "$FAKE_INCUS_STATE/instances/box/status")"
+  # The trap runs once publish returns, which here it does having published.
+  assert_eq "SIG$sig during publish: the image was saved" "present" "$(present "$FAKE_INCUS_STATE/images/incus-init/box")"
+  assert_not_contains "SIG$sig during publish: …so no word of an unsaved one" "No template saved" "$OUT"
   lines_back "SIG$sig during publish"
   no_secrets "SIG$sig during publish"
 done

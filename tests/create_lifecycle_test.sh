@@ -26,7 +26,8 @@ assert_not_contains() {
   else FAIL=$((FAIL+1)); echo "  FAIL $1"; echo "    expected NOT to contain: $2"; fi
 }
 
-SANDBOX="$(mktemp -d)"
+# Resolved, as boxen.create resolves the workspace (macOS: /var is /private/var).
+SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$SANDBOX"' EXIT
 mkdir -p "$SANDBOX/bin" "$SANDBOX/repo/plugins" "$SANDBOX/ws" "$SANDBOX/home"
 cp "$SCRIPT_DIR/lib/fake_incus" "$SANDBOX/bin/incus"
