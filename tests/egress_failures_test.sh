@@ -218,6 +218,12 @@ assert_eq "a retry finishes it" "0" "$RC"
 assert_eq "d is locked" "reject" "$(cfg d devices.eth0.security.acls.default.egress.action)"
 assert_eq "and runs" "RUNNING" "$(status d)"
 
+echo "ls when the containers can't be listed"
+FAKE_INCUS_FAIL_CALL='^list user.managed-by=boxen' run ls
+assert_eq "ls fails" "1" "$RC"
+assert_contains "and says why" "Could not list the containers" "$OUT"
+assert_not_contains "without an empty table" "CONTAINER" "$OUT"
+
 echo ""
 echo "passed: $PASS  failed: $FAIL"
 [[ "$FAIL" -eq 0 ]]

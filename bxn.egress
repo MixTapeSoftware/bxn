@@ -284,7 +284,7 @@ all_hosts() {
 }
 
 cmd_ls() {
-  local c="${1:-}" egress mode active port h
+  local c="${1:-}" egress mode active port h cs
   if [[ "${2:-}" == "--tsv" ]]; then
     need_container "$c"
     if [[ "${3:-}" == "--applied" ]]; then
@@ -311,8 +311,11 @@ cmd_ls() {
     hosts_with_sources "$c" | awk -F'\t' '{ printf "%-50s  %s\n", $1, $2 }'
     return 0
   fi
+  # Listed first: a failed list in a for loop's words would print nothing
+  # and exit 0, as if no container had an allowlist.
+  cs="$(allowlisted)" || exit 1
   printf '%-28s %-8s %-18s %-22s %s\n' CONTAINER MODE ACTIVE PROXY NOTES
-  for c in $(allowlisted); do status_line "$c"; done
+  for c in $cs; do status_line "$c"; done
   ufw_note
 }
 
