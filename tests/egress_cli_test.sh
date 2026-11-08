@@ -252,7 +252,7 @@ assert_contains "with its proxy" "boxen-egress:10000" "$OUT"
 assert_not_contains "a settled proxy has no note" "older proxies still run" "$OUT"
 echo stopping > "$FAKE_INCUS_STATE/ctl/$E/box/listening"
 run ls
-assert_contains "ls says a narrowing left older proxies running" "a narrowing didn't finish, older proxies still run: bxn egress refresh box" "$OUT"
+assert_contains "ls says a narrowing left older proxies running" "a change didn't finish, a proxy it should have ended still runs: bxn egress refresh box" "$OUT"
 assert_not_contains "and doesn't call that not listening" "no proxy listening" "$OUT"
 rm "$FAKE_INCUS_STATE/ctl/$E/box/listening"
 run ls box

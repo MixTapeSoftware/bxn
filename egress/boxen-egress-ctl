@@ -20,8 +20,9 @@
 #   stop <agent>                     end every generation; nothing serves
 #   remove <agent>                   stop, then remove the agent's units
 #   status [<agent>]                 one line per agent; listening is yes, no,
-#                                    or stopping (older generations that a
-#                                    tighten ended are still running)
+#                                    or stopping (a generation that a cut-short
+#                                    widen started, or older ones a tighten
+#                                    ended, still runs)
 #   hosts <agent>                    the hosts the current generation allows
 #   log <agent> [<since>]            decisions as TSV: time host port decision reason gen
 #   boot                             at boot: start each agent's current generation
@@ -62,9 +63,10 @@ gens_active() {
     awk '{print $1}' | sed -E "s/^boxen-gen_$1@([0-9]+)\.service$/\1/" | grep -E '^[0-9]+$' | sort -n || true
 }
 
-# Generations a tighten ended that must not keep running. Written before the
-# tighten moves current and cleared once they've stopped, so a tighten cut
-# short leaves a record that the next command finishes.
+# Generations that must not keep running: the older ones a tighten ends, or
+# the one a widen starts until it becomes current. Written before the change
+# and cleared once it's done, so a change cut short leaves a record that the
+# next command finishes.
 stopping_file() { echo "$ETC/agents/$1/stopping"; }
 set_stopping() {
   printf '%s\n' $2 > "$(stopping_file "$1").new" && mv "$(stopping_file "$1").new" "$(stopping_file "$1")"
@@ -79,13 +81,15 @@ stopping_left() {
   done
   return 0
 }
-# Stops what an interrupted tighten left running. Fails if any is left.
+# Drops the record once nothing it lists runs, apart from the current one.
+clear_stopping() { [[ -n "$(stopping_left "$1")" ]] || rm -f "$(stopping_file "$1")"; }
+# Stops what an interrupted change left running. Fails if any is left.
 finish_stopping() {
   local agent="$1" g left
   [[ -f "$(stopping_file "$agent")" ]] || return 0
   left="$(stopping_left "$agent")"
   for g in $left; do
-    echo "boxen-egress-ctl: $agent/$g: an earlier tighten didn't finish; stopping it now" >&2
+    echo "boxen-egress-ctl: $agent/$g: an earlier change didn't finish; stopping it now" >&2
     systemctl stop "$(gen_unit "$agent" "$g")" 2>/dev/null & done
   wait
   for g in $left; do systemctl reset-failed "$(gen_unit "$agent" "$g")" 2>/dev/null || true; done
@@ -366,7 +370,7 @@ cmd_widen() {
   lock
   refuse_active "$agent" "$gen"
   finish_stopping "$agent" ||
-    die "widen $agent/$gen: generations an earlier tighten ended are still running: $(stopping_left "$agent" | tr '\n' ' ')"
+    die "widen $agent/$gen: generations an earlier change ended are still running: $(stopping_left "$agent" | tr '\n' ' ')"
   old="$(gens_active "$agent" | grep -vx "$gen" || true)"
   draining="$(grep -vx "$(current "$agent")" <<<"$old" | grep -c . || true)"
   if (( draining >= MAX_DRAINING )); then
@@ -382,17 +386,26 @@ cmd_widen() {
     old="$(grep -vx "$g" <<<"$old" || true)"
     unchanged="--force ended draining generation $g, nothing else changed"
   fi
+  # Recorded first: until it's current it accepts next to the current one,
+  # so if this is cut short, status says stopping, not yes, and the next
+  # command stops it.
+  set_stopping "$agent" "$gen"
   cur="$(journal_cursor)"
-  systemctl start "$(gen_unit "$agent" "$gen")" || die "widen $agent/$gen: didn't start; $unchanged"
+  if ! systemctl start "$(gen_unit "$agent" "$gen")"; then
+    clear_stopping "$agent"
+    die "widen $agent/$gen: didn't start; $unchanged"
+  fi
   if ! wait_ack "$(gen_unit "$agent" "$gen")" "$cur"; then
     systemctl stop "$(gen_unit "$agent" "$gen")" 2>/dev/null || true
     systemctl reset-failed "$(gen_unit "$agent" "$gen")" 2>/dev/null || true
+    clear_stopping "$agent"
     die "widen $agent/$gen: it never started accepting, so it was stopped; $unchanged"
   fi
   # Only now do older generations stop taking new connections. They keep
   # their open ones until those close or EXIT_TIMEOUT passes.
   set_current "$agent" "$gen"
   for g in $old; do systemctl kill --kill-whom=main --signal=SIGTERM "$(gen_unit "$agent" "$g")" 2>/dev/null || true; done
+  rm -f "$(stopping_file "$agent")"
 }
 
 cmd_tighten() {
@@ -520,7 +533,7 @@ cmd_boot() {
   # A host change can arrive while this runs; it waits, then sees this.
   lock
   for agent in $(ls "$ETC/agents" 2>/dev/null || true); do
-    finish_stopping "$agent" || echo "boot: $agent: generations an earlier tighten ended are still running" >&2
+    finish_stopping "$agent" || echo "boot: $agent: generations an earlier change ended are still running" >&2
     cur="$(current "$agent")"
     [[ "$cur" == none ]] && continue
     systemctl start "boxen-hold_$agent.service" || true

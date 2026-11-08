@@ -161,7 +161,7 @@ FAKE_SYSTEMD_DIE_AFTER='boxen-gen_a@2.service' run tighten a 2
 gen a enforce 3333cccc h1.example.com h3.example.com >/dev/null
 run widen a 3
 assert_eq "the widen goes through" "0" "$RC"
-assert_contains "it says what it stopped" "a/1: an earlier tighten didn't finish; stopping it now" "$OUT"
+assert_contains "it says what it stopped" "a/1: an earlier change didn't finish; stopping it now" "$OUT"
 assert_eq "the wider generation is stopped, not draining" "inactive" "$(unit_state 'boxen-gen_a@1.service')"
 assert_eq "status is settled" "yes" "$(listening a)"
 
@@ -177,6 +177,53 @@ reboot
 ctl boot
 assert_eq "after a reboot only the new generation starts" "2" "$(active_gens a)"
 assert_eq "and the record of the cut-short tighten is gone" "yes" "$(listening a)"
+
+echo "a widen cut short after the new generation starts"
+# Found by tests/property_test.sh: the new generation accepted next to the
+# current one while status said yes, so going back to the current policy
+# looked unchanged and the wider list stayed open.
+fresh
+ctl add a 4750
+gen a enforce 1111aaaa h1.example.com >/dev/null
+ctl widen a 1
+gen a enforce 2222bbbb h1.example.com wide.example.com >/dev/null
+FAKE_SYSTEMD_DIE_AFTER='boxen-gen_a@2.service' run widen a 2
+assert_eq "the wider generation runs next to the current one" "1 2" "$(active_gens a)"
+assert_eq "current hasn't moved" "1" "$(ctl status a | cut -f3)"
+assert_eq "status doesn't call it settled" "stopping" "$(listening a)"
+gen a enforce 1111aaaa h1.example.com >/dev/null
+run tighten a 3
+assert_eq "the host's next tighten goes through" "0" "$RC"
+assert_eq "and stops it" "3" "$(active_gens a)"
+assert_eq "status is settled" "yes" "$(listening a)"
+fresh
+ctl add a 4750
+gen a enforce 1111aaaa h1.example.com >/dev/null
+ctl widen a 1
+gen a enforce 2222bbbb h1.example.com wide.example.com >/dev/null
+FAKE_SYSTEMD_DIE_AFTER='boxen-gen_a@2.service' run widen a 2
+gen a enforce 3333cccc h1.example.com wide.example.com h3.example.com >/dev/null
+run widen a 3
+assert_eq "a later widen goes through" "0" "$RC"
+assert_eq "and stops it, not just drains it" "inactive" "$(unit_state 'boxen-gen_a@2.service')"
+assert_eq "the one that was current drains" "draining" "$(unit_state 'boxen-gen_a@1.service')"
+fresh
+ctl add a 4750
+gen a enforce 1111aaaa h1.example.com >/dev/null
+ctl widen a 1
+gen a enforce 2222bbbb h1.example.com wide.example.com >/dev/null
+FAKE_SYSTEMD_NO_ACK='boxen-gen_a@2.service' FAKE_SYSTEMD_STUCK='boxen-gen_a@2.service' run widen a 2
+assert_eq "a widen that never acks and won't stop fails" "1" "$RC"
+assert_eq "status says stopping while it runs" "stopping" "$(listening a)"
+fresh
+ctl add a 4750
+gen a enforce 1111aaaa h1.example.com >/dev/null
+ctl widen a 1
+gen a enforce 2222bbbb h1.example.com wide.example.com >/dev/null
+FAKE_SYSTEMD_START_FAIL='boxen-gen_a@2.service' run widen a 2
+assert_eq "a widen that doesn't start fails" "1" "$RC"
+assert_eq "and leaves status settled" "yes" "$(listening a)"
+assert_eq "with no record left" "no" "$([[ -f "$S/etc/agents/a/stopping" ]] && echo yes || echo no)"
 
 echo "a tighten whose old generation won't stop"
 serving_wide
@@ -238,6 +285,20 @@ log="$(ctl log a)"
 assert_contains "the new agent's log has its own record" "new-agent.example.com" "$log"
 assert_not_contains "but not the removed agent's" "old-agent.example.com" "$log"
 assert_not_contains "nor the probe's" "boxen-probe.invalid" "$log"
+
+echo "gen keeps the current generation while it isn't running"
+# After a reboot nothing runs until boot, and gen may run first; the ten-
+# newest rule alone would delete current, and boot would have nothing to start.
+fresh
+ctl add a 4750
+gen a enforce 1111aaaa h1.example.com >/dev/null
+ctl widen a 1
+reboot
+for i in 1 2 3 4 5 6 7 8 9 10 11; do gen a enforce 2222bbbb h1.example.com >/dev/null; done
+assert_eq "its directory is kept" "yes" "$([[ -d "$S/etc/agents/a/gens/1" ]] && echo yes || echo no)"
+assert_eq "an older one that isn't current is not" "no" "$([[ -d "$S/etc/agents/a/gens/2" ]] && echo yes || echo no)"
+ctl boot
+assert_eq "boot starts it" "1" "$(active_gens a)"
 
 echo ""
 echo "passed: $PASS  failed: $FAIL"

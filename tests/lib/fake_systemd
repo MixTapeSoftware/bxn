@@ -22,15 +22,21 @@
 #   FAKE_SYSTEMD_DIE_AFTER    a unit glob: once one starts, the caller is
 #                             killed with FAKE_SYSTEMD_DIE_SIGNAL (KILL)
 #   FAKE_SYSTEMD_STUCK        a unit glob that stop leaves running
+#   FAKE_SYSTEMD_START_FAIL   a unit glob whose start fails: the unit stays
+#                             inactive and start exits 1
+#   FAKE_SYSTEMD_NO_ACK       a unit glob that starts but never acks, as a
+#                             generation that never begins accepting
 #   FAKE_CURL_LATE            the probe gets no answer and leaves no record
 set -uo pipefail
 F="${FAKE_SYSTEMD:?}"
 U="$F/units"
-mkdir -p "$U"
-touch "$F/journal"
+# Builtins where they do, so a property test's thousands of calls stay quick.
+[[ -d "$U" ]] || mkdir -p "$U"
+[[ -f "$F/journal" ]] || : > "$F/journal"
 now() { echo "$(date +%s)000000"; }
 jr() { printf '%s\t%s\t%s\n' "$1" "$(now)" "$2" >> "$F/journal"; }
-st() { if [[ -f "$U/$1" ]]; then cut -d' ' -f1 "$U/$1"; else echo inactive; fi; }
+st() { local s=inactive; [[ -f "$U/$1" ]] && read -r s _ < "$U/$1"; echo "$s"; }
+pid_of() { local s p=0; [[ -f "$U/$1" ]] && read -r s p < "$U/$1"; echo "$p"; }
 running() { local s; s="$(st "$1")"; [[ "$s" == active || "$s" == draining ]]; }
 # boxen-gen_<agent>@<n>.service -> that generation's directory
 gen_dir() { local a="${1#*_}" n="${1#*@}"; echo "$FAKE_SYSTEMD_ETC/agents/${a%@*}/gens/${n%.service}"; }
@@ -49,6 +55,10 @@ systemctl_() {
           echo "active 1" > "$U/$u" ;;
         boxen-gen_*|boxen-check_*)
           running "$u" && return 0
+          # shellcheck disable=SC2053
+          if [[ -n "${FAKE_SYSTEMD_START_FAIL:-}" && "$u" == $FAKE_SYSTEMD_START_FAIL ]]; then
+            jr "$u" "failed to start"; echo "inactive 0" > "$U/$u"; return 1
+          fi
           [[ -f "$(gen_dir "$u")/mode" ]] || { jr "$u" "no such generation"; echo "inactive 0" > "$U/$u"; return 0; }
           if [[ "$u" == boxen-check_* ]]; then
             p="$(cat "$F/port4700" 2>/dev/null)"
@@ -57,7 +67,10 @@ systemctl_() {
           fi
           pid=$(( RANDOM + 1000 ))
           echo "active $pid" > "$U/$u"
-          [[ "$u" == boxen-gen_* ]] && jr "boxen-egress-ack@x.service" "pid: $pid%0A"
+          # shellcheck disable=SC2053
+          if [[ "$u" == boxen-gen_* && ! ( -n "${FAKE_SYSTEMD_NO_ACK:-}" && "$u" == $FAKE_SYSTEMD_NO_ACK ) ]]; then
+            jr "boxen-egress-ack@x.service" "pid: $pid%0A"
+          fi
           # shellcheck disable=SC2053
           if [[ -n "${FAKE_SYSTEMD_DIE_AFTER:-}" && "$u" == $FAKE_SYSTEMD_DIE_AFTER ]]; then
             kill -s "${FAKE_SYSTEMD_DIE_SIGNAL:-KILL}" "$PPID"
@@ -71,17 +84,17 @@ systemctl_() {
       return 0 ;;
     kill)
       u="$(last_arg "$@")"
-      [[ "$(st "$u")" == active ]] && echo "draining $(cut -d' ' -f2 "$U/$u")" > "$U/$u"
+      [[ "$(st "$u")" == active ]] && echo "draining $(pid_of "$u")" > "$U/$u"
       return 0 ;;
     is-active) running "$(last_arg "$@")" ;;
     show)
       u="$(last_arg "$@")"
-      if running "$u"; then cut -d' ' -f2 "$U/$u"; else echo 0; fi ;;
+      if running "$u"; then pid_of "$u"; else echo 0; fi ;;
     list-units)
       p="$(last_arg "$@")"
       for f in "$U"/*; do
         [[ -f "$f" ]] || continue
-        n="$(basename "$f")"
+        n="${f##*/}"
         # shellcheck disable=SC2053
         [[ "$n" == $p ]] && running "$n" && echo "$n loaded active running x"
       done
@@ -129,11 +142,11 @@ curl_() {
   jr "$o" "$rec"
 }
 
-case "$(basename "$0")" in
+case "${0##*/}" in
   systemctl) systemctl_ "$@" ;;
   journalctl) journalctl_ "$@" ;;
   systemd-escape) printf '%s\n' "$1" | sed 's/-/\\x2d/g' ;;
   curl) curl_ ;;
   sleep) exit 0 ;;
-  *) echo "fake_systemd: called as $(basename "$0")" >&2; exit 1 ;;
+  *) echo "fake_systemd: called as ${0##*/}" >&2; exit 1 ;;
 esac
