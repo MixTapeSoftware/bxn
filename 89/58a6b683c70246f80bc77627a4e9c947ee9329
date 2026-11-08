@@ -1,0 +1,28 @@
+tests/create_pickers_test.sh
+  s_72cef02a544353::t_2e82cef6ba008e 1-247
+boxen.macos.setup
+  s_72cef02a544353::t_88e5bd18a6da66 20-41
+boxen.create
+  s_72cef02a544353::t_0aa779fd6fa2ca 1503,1564-1579,2085
+  s_72cef02a544353::t_ecef5956da0707 837-841,845,848
+  s_72cef02a544353::t_bfc1a42c06c704 1225,1230-1234
+  s_72cef02a544353::t_680ec068fef9b8 50-51,68,117,144,935-936,960,1008,1302,1496-1498,1501-1502,1504-1505,1911,1956,2014,2080-2083,2104
+README.md
+  s_72cef02a544353::t_3b31aa8b49704e 141-142,300,362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8958a6b683c70246f80bc77627a4e9c947ee9329",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
