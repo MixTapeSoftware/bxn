@@ -42,6 +42,7 @@ log()  { echo "[+] $1"; }
 warn() { echo "[!] $1"; }
 error() { echo "[ERROR] $1" >&2; exit 1; }
 READY_TIMEOUT=2
+eval "$(extract_fn start_and_wait)"
 eval "$(extract_fn stash_tailscale_state)"
 eval "$(extract_fn restore_tailscale_state)"
 declare -F stash_tailscale_state restore_tailscale_state >/dev/null || { echo "functions not found in boxen.create"; exit 1; }
@@ -202,12 +203,13 @@ echo "publish fails during a template build"
   echo 'error(){ echo "[ERROR] $1" >&2; exit 1; }'
   echo 'wait_for_container() { :; }'
   echo 'wait_for_network() { :; }'
-  for fn in stash_tailscale_state restore_tailscale_state warn_tailscale_backup \
-            template_cleanup_on_exit cleanup_on_exit save_template; do
+  for fn in start_and_wait stash_tailscale_state restore_tailscale_state warn_tailscale_backup \
+            template_cleanup_on_exit cleanup_on_exit saved_token_names restore_saved_tokens save_template; do
     extract_fn "$fn"
   done
   echo 'CONTAINER_NAME=box; CREATED_INSTANCE=1; HOST_USER=dev; CONTAINER_WORKSPACE=/workspace'
   echo 'SAVE_TEMPLATE=1; READY_TIMEOUT=2; TS_STATE_BACKUP=""; BUILD_SUDO_GRANTED=0'
+  echo 'SAVED_TOKENS=""; TEMPLATE_PUBLISHED=0'
   echo 'revoke_build_sudo() { :; }'
   grep -E "^trap (cleanup_on_exit EXIT|'exit [0-9]+' (INT|TERM|HUP))\$" "$REPO_ROOT/boxen.create"
   awk '/^# Disable cleanup trap on success/ {c=1} /^# Done/ {exit} c' "$REPO_ROOT/boxen.create"
@@ -230,6 +232,88 @@ bash "$SANDBOX/template-build.sh" > "$SANDBOX/out" 2>&1 && RC=0 || RC=$?
 assert_eq "publish succeeds: the build succeeds" "0" "$RC"
 assert_eq "publish succeeds: the image has no Tailscale state" "gone" "$(present "$(image)/var/lib/tailscale")"
 assert_eq "publish succeeds: the node key is back" "NODE-KEY" "$(cat "$(root)/var/lib/tailscale/tailscaled.state" 2>/dev/null)"
+
+# ===========================================================================
+echo "the token lines of ~/.zshenv"
+# ===========================================================================
+# A value that would end a heredoc, as a line of its own, and characters a
+# command line would mangle. %q quotes it, as the plugins write it.
+TOKEN=$'tok-$(id)-\'"\nTOKENS\nx'
+printf -v TOKEN_LINE 'export GH_TOKEN=%q' "$TOKEN"
+OP_LINE='export OP_SERVICE_ACCOUNT_TOKEN=ops_SECRET9'
+zshenv() { echo "$FAKE_INCUS_STATE/instances/box/root/home/dev/.zshenv"; }
+image_zshenv() { echo "$FAKE_INCUS_STATE/images/incus-init/box/root/home/dev/.zshenv"; }
+token_box() {
+  fresh_box
+  rm -rf "$(root)/var/lib/tailscale"
+  mkdir -p "$(root)/home/dev"
+  printf '%s\n%s\n%s\n' 'export EDITOR=vim' "$TOKEN_LINE" "$OP_LINE" > "$(zshenv)"
+}
+# Nothing on the host's command lines, nor in what the build printed.
+no_secrets() {
+  assert_not_contains "$1: the token is in no incus argv" "tok-" "$(cat "$FAKE_INCUS_STATE/calls.log")"
+  assert_not_contains "$1: …nor the other token" "ops_SECRET9" "$(cat "$FAKE_INCUS_STATE/calls.log")"
+  assert_not_contains "$1: …nor in any command run in the container" "tok-" "$(execs)"
+  assert_not_contains "$1: …nor printed" "tok-" "$OUT"
+}
+# The lines as the user had them: each token once, the rest untouched.
+lines_back() {
+  assert_eq "$1: the token lines are back, once each" "1 1" \
+    "$(grep -cxF "$TOKEN_LINE" "$(zshenv)") $(grep -cxF "$OP_LINE" "$(zshenv)")"
+  assert_contains "$1: the other lines stay" "export EDITOR=vim" "$(cat "$(zshenv)")"
+  assert_eq "$1: the token is exactly what it was" "$TOKEN" \
+    "$(env -i HOME=/nonexistent bash -c '. "$1"; printf %s "$GH_TOKEN"' _ "$(zshenv)")"
+}
+
+token_box
+bash "$SANDBOX/template-build.sh" > "$SANDBOX/out" 2>&1 && RC=0 || RC=$?
+OUT="$(cat "$SANDBOX/out")"
+assert_eq "publish succeeds: the build succeeds" "0" "$RC"
+assert_not_contains "publish succeeds: the image has no tokens" "TOKEN" "$(cat "$(image_zshenv)")"
+assert_contains "publish succeeds: …and keeps the other lines" "export EDITOR=vim" "$(cat "$(image_zshenv)")"
+lines_back "publish succeeds"
+assert_contains "publish succeeds: the tokens go back on stdin" "ops_SECRET9" "$(cat "$FAKE_INCUS_STATE"/exec-stdin/*)"
+no_secrets "publish succeeds"
+
+token_box
+FAKE_INCUS_FAIL_CALL='^publish box' bash "$SANDBOX/template-build.sh" > "$SANDBOX/out" 2>&1 && RC=0 || RC=$?
+OUT="$(cat "$SANDBOX/out")"
+assert_eq "publish fails, no Tailscale: the build fails" "1" "$RC"
+assert_eq "publish fails, no Tailscale: the container is running again" "RUNNING" "$(cat "$FAKE_INCUS_STATE/instances/box/status")"
+lines_back "publish fails"
+assert_contains "publish fails: says no template was saved" "No template saved" "$OUT"
+no_secrets "publish fails"
+
+token_box
+FAKE_INCUS_FAIL_CALL='^start box' bash "$SANDBOX/template-build.sh" > "$SANDBOX/out" 2>&1 && RC=0 || RC=$?
+OUT="$(cat "$SANDBOX/out")"
+assert_eq "it won't start again: the build fails" "1" "$RC"
+assert_contains "it won't start again: names the lines it couldn't put back" "GH_TOKEN OP_SERVICE_ACCOUNT_TOKEN line(s)" "$OUT"
+assert_contains "it won't start again: …and how to set them" "bxn -e box <NAME>" "$OUT"
+assert_not_contains "it won't start again: a template was saved, so it doesn't say otherwise" "No template saved" "$OUT"
+no_secrets "it won't start again"
+
+# A publish that takes a while, interrupted (kill PID, or a closed terminal).
+mkdir -p "$SANDBOX/slow"
+cat > "$SANDBOX/slow/incus" <<EOF
+#!/bin/bash
+if [[ "\$1" == publish ]]; then touch "\$FAKE_INCUS_STATE/publishing"; sleep 2; fi
+exec "$SANDBOX/bin/incus" "\$@"
+EOF
+chmod +x "$SANDBOX/slow/incus"
+for sig in TERM HUP; do
+  token_box
+  PATH="$SANDBOX/slow:$PATH" bash "$SANDBOX/template-build.sh" > "$SANDBOX/out" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 50); do [[ -f "$FAKE_INCUS_STATE/publishing" ]] && break; sleep 0.1; done
+  kill -"$sig" "$pid"
+  wait "$pid" && RC=0 || RC=$?
+  OUT="$(cat "$SANDBOX/out")"
+  assert_eq "SIG$sig during publish: the build stops" "$([[ $sig == TERM ]] && echo 143 || echo 129)" "$RC"
+  assert_eq "SIG$sig during publish: the container is running again" "RUNNING" "$(cat "$FAKE_INCUS_STATE/instances/box/status")"
+  lines_back "SIG$sig during publish"
+  no_secrets "SIG$sig during publish"
+done
 
 echo ""
 echo "passed: $PASS  failed: $FAIL"
