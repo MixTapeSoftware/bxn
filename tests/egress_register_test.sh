@@ -77,8 +77,10 @@ assert_eq "it isn't registered" "" "$(cfg off1 user.boxen.egress.container)"
 assert_eq "it isn't started" "STOPPED" "$(status off1)"
 assert_eq "no proxy settings are written" "" "$(cfg off1 environment.HTTPS_PROXY)"
 run rm off1 docs.rs
-assert_contains "rm fails the same way" "off1 has no allowlist" "$OUT"
+assert_eq "rm fails" "1" "$RC"
+assert_contains "the same way" "off1 has no allowlist" "$OUT"
 run allow off1 'not a host'
+assert_eq "a bad host fails" "1" "$RC"
 assert_contains "a bad host is refused first" "Not a hostname bxn accepts: not a host" "$OUT"
 assert_eq "still unregistered" "" "$(cfg off1 user.boxen.egress.container)"
 run allow off1
@@ -126,7 +128,10 @@ run refresh box
 assert_eq "refresh fixes it" "0" "$RC"
 assert_contains "and says so" "replacing it" "$OUT"
 assert_eq "the proxy is on box's port again" "10002" "$(ctl_port box)"
-assert_eq "and listens" "yes" "$(eg ls 2>/dev/null | grep -q '^box .*no proxy' && echo no || echo yes)"
+run ls
+assert_eq "ls succeeds" "0" "$RC"
+assert_contains "and lists box" "box  " "$(grep '^box ' <<< "$OUT")"
+assert_not_contains "with its proxy listening" "no proxy" "$(grep '^box ' <<< "$OUT")"
 
 echo "a proxy whose policy isn't the recorded one"
 echo deadbeefdeadbeef > "$FAKE_INCUS_STATE/ctl/$E/box/gens/$(gen_of box)/policy"
