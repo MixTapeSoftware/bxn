@@ -43,11 +43,14 @@ const logMessage = "BOXEN-TLS-NAME-CHECK"
 // TLS allows a record body of at most 16 KB (RFC 8446, 5.1).
 const maxRecord = 16384
 
+// crypto/tls reads a ClientHello of at most 64 KB (its maxHandshake).
+const maxHello = 65536
+
 // A client may split its ClientHello across several handshake records. They
-// are held back until it is whole, but never more than four full records'
-// worth, which is crypto/tls's own limit on a ClientHello and far more than
-// any client sends (a few KB, post-quantum key shares included).
-const maxHeld = 4 * (5 + maxRecord)
+// are held back until it is whole, but never more than the largest one
+// crypto/tls reads takes in full records, which is far more than any client
+// sends (a few KB, post-quantum key shares included).
+const maxHeld = 4 + maxHello + 5*((4+maxHello+maxRecord-1)/maxRecord)
 
 // As upstream: the role is the client certificate's name. bxn uses none, so
 // allow_missing_role applies.
@@ -183,21 +186,25 @@ func (r *helloRecords) check(host string) (name, reason string, ok bool) {
 		return "", "not_tls", true
 	}
 	for !wholeMessage(r.msg) {
-		if len(r.msg) >= 4 && 4+msgLen(r.msg) > maxHeld {
+		// The records so far and the next must fit in what may be held
+		// back. That is decided on the records, not on how many bytes
+		// have arrived, so how the client splits its writes can't change
+		// the verdict.
+		if len(r.msg) >= 4 && msgLen(r.msg) > maxHello || r.end+5 > maxHeld {
 			return "", "malformed", true
 		}
 		if len(b)-r.end < 5 {
-			return r.more()
+			return "", "", false
 		}
 		// Until the ClientHello is whole, a client sends only handshake
 		// records, none empty (RFC 8446, 5.1). A record longer than TLS
-		// allows isn't TLS; refusing it also caps what is held back.
+		// allows isn't TLS.
 		n := int(b[r.end+3])<<8 | int(b[r.end+4])
-		if b[r.end] != 22 || n == 0 || n > maxRecord {
+		if b[r.end] != 22 || n == 0 || n > maxRecord || r.end+5+n > maxHeld {
 			return "", "malformed", true
 		}
 		if len(b)-r.end < 5+n {
-			return r.more()
+			return "", "", false
 		}
 		r.msg = append(r.msg, b[r.end+5:r.end+5+n]...)
 		r.end += 5 + n
@@ -216,14 +223,6 @@ func (r *helloRecords) check(host string) (name, reason string, ok bool) {
 		return name, "mismatch", true
 	}
 	return name, "", true
-}
-
-// more waits for more bytes, unless as much as may be held back already is.
-func (r *helloRecords) more() (name, reason string, ok bool) {
-	if len(r.held) >= maxHeld {
-		return "", "malformed", true
-	}
-	return "", "", false
 }
 
 // A handshake message is a type byte and a 3-byte length, then the body.

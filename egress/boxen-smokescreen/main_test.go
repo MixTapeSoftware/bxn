@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net"
@@ -30,7 +31,7 @@ import (
 )
 
 // hello is the first record a TLS client sends for serverName.
-func hello(t *testing.T, serverName string) []byte {
+func hello(t testing.TB, serverName string) []byte {
 	t.Helper()
 	client, server := net.Pipe()
 	defer server.Close()
@@ -209,11 +210,80 @@ func TestFragmentedHello(t *testing.T) {
 	}
 }
 
+// bigHello is a ClientHello for serverName grown by a padding extension
+// (RFC 7685) to a body of size bytes, in records as full as TLS allows.
+func bigHello(t testing.TB, serverName string, size int) []byte {
+	t.Helper()
+	msg := append([]byte(nil), hello(t, serverName)[5:]...)
+	p := 4 + 2 + 32                                // type, length, version, random
+	p += 1 + int(msg[p])                           // session ID
+	p += 2 + int(binary.BigEndian.Uint16(msg[p:])) // cipher suites
+	p += 1 + int(msg[p])                           // compression methods
+	exts := int(binary.BigEndian.Uint16(msg[p:]))  // extensions
+	pad := size - (len(msg) - 4) - 4
+	if pad < 0 || exts+4+pad > 0xffff {
+		t.Fatalf("can't pad a ClientHello to %d bytes", size)
+	}
+	binary.BigEndian.PutUint16(msg[p:], uint16(exts+4+pad))
+	msg = append(msg, 0, 21, byte(pad>>8), byte(pad))
+	msg = append(msg, make([]byte, pad)...)
+	msg[1], msg[2], msg[3] = byte(size>>16), byte(size>>8), byte(size)
+	var out []byte
+	for len(msg) > 0 {
+		n := len(msg)
+		if n > maxRecord {
+			n = maxRecord
+		}
+		out = append(out, 22, 3, 1, byte(n>>8), byte(n))
+		out = append(out, msg[:n]...)
+		msg = msg[n:]
+	}
+	return out
+}
+
+// The largest ClientHello crypto/tls reads, 64 KB in five records, passes
+// however the client splits it into writes. Once, written a byte at a time,
+// it was refused when as much as may be held back had arrived before its
+// last record had. A byte longer is refused.
+func TestLargestHello(t *testing.T) {
+	h := bigHello(t, "allowed.example", maxHello)
+	if len(h) != maxHeld {
+		t.Fatalf("the largest ClientHello is %d bytes, but up to %d are held back", len(h), maxHeld)
+	}
+	conn, got, logs := tunnel(t, true, "CONNECT", "allowed.example:443")
+	if err := send(conn, h); err != nil {
+		t.Fatalf("written whole: %v (%s)", err, logs.String())
+	}
+	if b := received(t, conn, got); !bytes.Equal(b, h) {
+		t.Fatal("written whole, it wasn't forwarded intact")
+	}
+	conn, got, logs = tunnel(t, true, "CONNECT", "allowed.example:443")
+	for i := range h {
+		if err := send(conn, h[i:i+1]); err != nil {
+			t.Fatalf("a byte at a time, byte %d: %v (%s)", i, err, logs.String())
+		}
+	}
+	if b := received(t, conn, got); !bytes.Equal(b, h) {
+		t.Fatal("a byte at a time, it wasn't forwarded intact")
+	}
+
+	conn, got, logs = tunnel(t, true, "CONNECT", "allowed.example:443")
+	if send(conn, bigHello(t, "allowed.example", maxHello+1)) == nil {
+		t.Fatal("a ClientHello longer than crypto/tls reads was let through")
+	}
+	if b := received(t, conn, got); len(b) != 0 {
+		t.Fatalf("forwarded %d bytes", len(b))
+	}
+	if m := logLine(t, logs); m["reason"] != "malformed" {
+		t.Fatalf("log line %v", m)
+	}
+}
+
 func TestFragmentedHelloRefused(t *testing.T) {
 	h := hello(t, "allowed.example")
 	notHandshake := fragment(h, 40)
 	notHandshake[5+40] = 23 // the second record is application data
-	hold := 4 * (5 + maxRecord)
+	hold := maxHeld
 	// A ClientHello said to be 60000 bytes, a byte to a record: it never
 	// gets whole before as much as may be held back is.
 	tiny := []byte{22, 3, 1, 0, 4, 1, 0, 0xea, 0x60}
