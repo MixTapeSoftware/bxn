@@ -1,7 +1,8 @@
 // egress/boxen-smokescreen/uploads_test.go
 // The upload watch, with a fake clock: counted across tunnels, the hour's
-// window, which limit applies, one log line per crossing, the cap on and off,
-// report mode, and the TLS name check alongside it.
+// window, which limit applies and which count it goes to, the bound on the
+// counts, one log line per crossing, the cap on and off, report mode, and the
+// TLS name check alongside it.
 package main
 
 import (
@@ -9,6 +10,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -92,22 +94,28 @@ func TestLimitFor(t *testing.T) {
 		"*.api.github.com":   4000,
 		"uploads.github.com": 0,
 	}, false)
-	for host, want := range map[string]int64{
-		"github.com":           2000, // its own entry
-		"api.github.com":       3000, // *.github.com covers it
-		"x.api.github.com":     4000, // the longer wildcard wins
-		"uploads.github.com":   0,    // off
-		"evilgithub.com":       100,  // no wildcard covers it
-		"example.com":          100,  // the default
-		"github.com.evil.test": 100,
+	for host, want := range map[string]struct {
+		key   string
+		limit int64
+	}{
+		"github.com":           {"github.com", 2000},       // its own entry
+		"api.github.com":       {"*.github.com", 3000},     // *.github.com covers it
+		"x.api.github.com":     {"*.api.github.com", 4000}, // the longer wildcard wins
+		"uploads.github.com":   {"uploads.github.com", 0},  // off
+		"evilgithub.com":       {"default", 100},           // no wildcard covers it
+		"example.com":          {"default", 100},           // the default
+		"github.com.evil.test": {"default", 100},
 	} {
-		if got := w.limitFor(host); got != want {
-			t.Errorf("limitFor(%s) = %d, want %d", host, got, want)
+		if key, limit := w.limitFor(host); key != want.key || limit != want.limit {
+			t.Errorf("limitFor(%s) = %s %d, want %s %d", host, key, limit, want.key, want.limit)
 		}
 	}
 	w, _, _ = watch(map[string]int64{"*.example.com": 10}, false)
-	if w.limitFor("example.com") != 0 || w.limitFor("a.example.com") != 10 {
+	if _, n := w.limitFor("example.com"); n != 0 {
 		t.Error("a wildcard covers subdomains only, and with no default nothing else has a limit")
+	}
+	if _, n := w.limitFor("a.example.com"); n != 10 {
+		t.Error("the wildcard didn't cover a subdomain")
 	}
 }
 
@@ -130,6 +138,7 @@ func TestCountsAcrossTunnelsAndLogsOnce(t *testing.T) {
 	}
 	m := lines[0]
 	if m["connect_host"] != "up.example" || m["connect_port"] != float64(443) ||
+		m["limit_key"] != "default" || m["counted_for"] != "up.example" ||
 		m["window_bytes"] != float64(1200) || m["limit_bytes"] != float64(1000) || m["cut"] != false {
 		t.Fatalf("log line %v", m)
 	}
@@ -156,7 +165,7 @@ func TestWindow(t *testing.T) {
 	}
 	clock.t = clock.t.Add(11 * time.Minute)
 	// The first 900 has aged out: 700 in the hour.
-	if got := w.hosts["up.example"].sent(clock.t.Unix() / 60); got != 700 {
+	if got := w.counts["up.example"].sent(clock.t.Unix() / 60); got != 700 {
 		t.Fatalf("sent %d in the hour, want 700", got)
 	}
 	must(200) // 900: under
@@ -167,15 +176,149 @@ func TestWindow(t *testing.T) {
 	if len(lines) != 2 || lines[1]["window_bytes"] != float64(1100) {
 		t.Fatalf("lines %v", lines)
 	}
-	if _, ok := w.hosts["other.example"]; ok {
+	if _, ok := w.counts["other.example"]; ok {
 		t.Fatal("a host nothing was sent to has a count")
 	}
 }
 
 func TestNoLimitCountsNothing(t *testing.T) {
 	w, _, logs := watch(map[string]int64{"default": 0, "small.example": 10}, true)
-	if err := w.add("big.example", 443, 1<<30); err != nil || len(w.hosts) != 0 || logs.Len() != 0 {
+	if err := w.add("big.example", 443, 1<<30); err != nil || len(w.counts) != 0 || logs.Len() != 0 {
 		t.Fatal("a host with no limit was counted")
+	}
+}
+
+// Hosts a limit's wildcard covers share its count, so an upload spread over
+// many names under it gets the limit once, not once per name.
+func TestWildcardSharesCount(t *testing.T) {
+	w, _, logs := watch(map[string]int64{"default": 1 << 30, "*.example.com": 1000, "own.example.com": 1000}, true)
+	for i := 0; i < 9; i++ {
+		if err := w.add(fmt.Sprintf("n%d.example.com", i), 443, 100); err != nil {
+			t.Fatalf("name %d: %v", i, err)
+		}
+	}
+	if err := w.add("n99.example.com", 443, 200); err != errUploadCut {
+		t.Fatalf("a tenth name took the wildcard past its limit: %v", err)
+	}
+	// A host with its own entry has its own count.
+	if err := w.add("own.example.com", 443, 1000); err != nil {
+		t.Fatalf("a host with its own entry was counted with the wildcard: %v", err)
+	}
+	if len(w.counts) != 2 || w.counts["*.example.com"] == nil {
+		t.Fatalf("counts %v", w.counts)
+	}
+	lines := uploadLines(t, logs)
+	if len(lines) != 1 {
+		t.Fatalf("lines %v", lines)
+	}
+	if m := lines[0]; m["connect_host"] != "n99.example.com" || m["limit_key"] != "*.example.com" ||
+		m["counted_for"] != "*.example.com" || m["window_bytes"] != float64(900) || m["cut"] != true {
+		t.Fatalf("log line %v", m)
+	}
+}
+
+// aclFile loads an allowlist as boxen-egress-ctl writes it, through
+// smokescreen's own loader.
+func aclFile(t *testing.T, domains ...string) *smokescreen.Config {
+	t.Helper()
+	y := "version: v1\nservices: []\ndefault:\n  project: bxn\n  action: enforce\n  allowed_domains:\n"
+	for _, d := range domains {
+		y += "    - \"" + d + "\"\n"
+	}
+	path := filepath.Join(t.TempDir(), "acl.yaml")
+	if err := os.WriteFile(path, []byte(y), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conf := smokescreen.NewConfig()
+	if err := conf.SetupEgressAcl(path); err != nil {
+		t.Fatal(err)
+	}
+	return conf
+}
+
+// Hosts with the default limit under one wildcard of the allowlist share a
+// count; hosts the allowlist names one by one each have their own.
+func TestAllowlistWildcardSharesDefault(t *testing.T) {
+	w, _, logs := watch(map[string]int64{"default": 1000, "*.limited.example": 5000}, true)
+	w.allowWildcards(aclFile(t, "*.cdn.example", "*.sub.cdn.example", "one.example", "two.example", "*.limited.example").EgressACL)
+	for i := 0; i < 10; i++ {
+		if err := w.add(fmt.Sprintf("x%d.cdn.example", i), 443, 100); err != nil {
+			t.Fatalf("name %d: %v", i, err)
+		}
+	}
+	if err := w.add("x10.cdn.example", 443, 1); err != errUploadCut {
+		t.Fatalf("an eleventh name under the allowlist's wildcard went past the default: %v", err)
+	}
+	// The longest wildcard of the allowlist has its own count.
+	if err := w.add("a.sub.cdn.example", 443, 1000); err != nil {
+		t.Fatalf("the longer wildcard was counted with the shorter: %v", err)
+	}
+	// A wildcard in the limits wins over one in the allowlist.
+	if err := w.add("a.limited.example", 443, 4000); err != nil {
+		t.Fatalf("the limits' wildcard didn't apply: %v", err)
+	}
+	for _, h := range []string{"one.example", "two.example"} {
+		if err := w.add(h, 443, 1000); err != nil {
+			t.Fatalf("%s was counted with another host: %v", h, err)
+		}
+	}
+	for _, name := range []string{"*.cdn.example", "*.sub.cdn.example", "*.limited.example", "one.example", "two.example"} {
+		if w.counts[name] == nil {
+			t.Errorf("no count for %s in %v", name, w.counts)
+		}
+	}
+	if len(w.counts) != 5 {
+		t.Fatalf("counts %v", w.counts)
+	}
+	lines := uploadLines(t, logs)
+	if len(lines) != 1 {
+		t.Fatalf("lines %v", lines)
+	}
+	if m := lines[0]; m["connect_host"] != "x10.cdn.example" || m["limit_key"] != "default" ||
+		m["counted_for"] != "*.cdn.example" || m["window_bytes"] != float64(1000) {
+		t.Fatalf("log line %v", m)
+	}
+	// No allowlist, or not one smokescreen loaded: nothing changes.
+	w.allowWildcards(nil)
+}
+
+// Hosts with the default each get a count only up to uploadMaxCounts; the
+// rest share one, and counts with nothing in the hour make room again.
+func TestCountsBounded(t *testing.T) {
+	w, clock, logs := watch(map[string]int64{"default": 1000, "big.example": 5000, "*.wild.example": 5000}, false)
+	for i := 0; i < uploadMaxCounts; i++ {
+		if err := w.add(fmt.Sprintf("h%d.example", i), 443, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		w.add(fmt.Sprintf("more%d.example", i), 443, 60)
+	}
+	if len(w.counts) != uploadMaxCounts {
+		t.Fatalf("%d counts, want %d", len(w.counts), uploadMaxCounts)
+	}
+	if got := w.overflow.sent(clock.t.Unix() / 60); got != 1200 {
+		t.Fatalf("the overflow count has %d, want 1200", got)
+	}
+	lines := uploadLines(t, logs)
+	if len(lines) != 1 || lines[0]["counted_for"] != overflowCount || lines[0]["limit_key"] != "default" ||
+		lines[0]["window_bytes"] != float64(1020) || lines[0]["connect_host"] != "more16.example" {
+		t.Fatalf("lines %v", lines)
+	}
+	// A host with its own entry or under a limit's wildcard still gets its
+	// own count: there are only as many as there are entries.
+	w.add("big.example", 443, 4000)
+	w.add("a.wild.example", 443, 4000)
+	if w.counts["big.example"] == nil || w.counts["*.wild.example"] == nil {
+		t.Fatal("an entry's count went to the overflow")
+	}
+	// An hour on, the idle counts are dropped and a new host has its own.
+	clock.t = clock.t.Add(61 * time.Minute)
+	if err := w.add("new.example", 443, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.counts) != 1 || w.counts["new.example"] == nil {
+		t.Fatalf("%d counts after the hour", len(w.counts))
 	}
 }
 
@@ -295,7 +438,7 @@ func TestCapThroughSmokescreen(t *testing.T) {
 	defer site.Close()
 	_, port, _ := net.SplitHostPort(site.Listener.Addr().String())
 
-	logs := &bytes.Buffer{}
+	logs := &syncBuffer{}
 	conf := smokescreen.NewConfig()
 	conf.Log.Out = logs
 	conf.Log.Formatter = &logrus.JSONFormatter{}

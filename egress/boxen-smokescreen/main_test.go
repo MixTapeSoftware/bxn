@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -16,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -155,6 +157,93 @@ func TestSplitWrites(t *testing.T) {
 	logLine(t, logs)
 }
 
+// fragment splits the handshake message in rec, one TLS record, into
+// several records, cut at each offset into the message.
+func fragment(rec []byte, cuts ...int) []byte {
+	msg := rec[5:]
+	var out []byte
+	from := 0
+	for _, to := range append(cuts, len(msg)) {
+		out = append(out, rec[0], rec[1], rec[2], byte((to-from)>>8), byte(to-from))
+		out = append(out, msg[from:to]...)
+		from = to
+	}
+	return out
+}
+
+// A legal ClientHello may come in several records, cut anywhere, even in
+// the handshake message's own header.
+func TestFragmentedHello(t *testing.T) {
+	h := hello(t, "allowed.example")
+	for _, cuts := range [][]int{{1}, {3}, {4}, {100}, {1, 2, 3, 50, 51}} {
+		f := fragment(h, cuts...)
+		conn, got, logs := tunnel(t, true, "CONNECT", "allowed.example:443")
+		// Written whole, then a record at a time, then a byte at a time.
+		if err := send(conn, f, []byte("after")); err != nil {
+			t.Fatalf("cuts %v: %v (%s)", cuts, err, logs.String())
+		}
+		if b := received(t, conn, got); !bytes.Equal(b, append(f, "after"...)) {
+			t.Fatalf("cuts %v: forwarded %d bytes, want %d", cuts, len(b), len(f)+5)
+		}
+		conn, got, _ = tunnel(t, true, "CONNECT", "allowed.example:443")
+		for _, c := range f {
+			if err := send(conn, []byte{c}); err != nil {
+				t.Fatalf("cuts %v, a byte at a time: %v", cuts, err)
+			}
+		}
+		if b := received(t, conn, got); !bytes.Equal(b, f) {
+			t.Fatalf("cuts %v, a byte at a time: not forwarded intact", cuts)
+		}
+	}
+
+	// Split, another name is still another name.
+	conn, got, logs := tunnel(t, true, "CONNECT", "allowed.example:443")
+	if send(conn, fragment(hello(t, "other.example"), 40)) == nil {
+		t.Fatal("a fragmented ClientHello for another name was let through")
+	}
+	if b := received(t, conn, got); len(b) != 0 {
+		t.Fatalf("forwarded %d bytes", len(b))
+	}
+	if m := logLine(t, logs); m["reason"] != "mismatch" || m["tls_name"] != "other.example" {
+		t.Fatalf("log line %v", m)
+	}
+}
+
+func TestFragmentedHelloRefused(t *testing.T) {
+	h := hello(t, "allowed.example")
+	notHandshake := fragment(h, 40)
+	notHandshake[5+40] = 23 // the second record is application data
+	hold := 4 * (5 + maxRecord)
+	// A ClientHello said to be 60000 bytes, a byte to a record: it never
+	// gets whole before as much as may be held back is.
+	tiny := []byte{22, 3, 1, 0, 4, 1, 0, 0xea, 0x60}
+	for len(tiny) < hold+6 {
+		tiny = append(tiny, 22, 3, 1, 0, 1, 0)
+	}
+	for _, tc := range []struct {
+		what  string
+		first []byte
+	}{
+		{"another record type before the ClientHello is whole", notHandshake},
+		{"an empty handshake record", []byte{22, 3, 1, 0, 0}},
+		{"a ClientHello longer than may be held back", []byte{22, 3, 1, 0, 4, 1, 0x02, 0, 0}},
+		{"more records than may be held back", tiny},
+	} {
+		t.Run(tc.what, func(t *testing.T) {
+			conn, got, logs := tunnel(t, true, "CONNECT", "allowed.example:443")
+			if send(conn, tc.first) == nil {
+				t.Fatal("let through")
+			}
+			if b := received(t, conn, got); len(b) != 0 {
+				t.Fatalf("forwarded %d bytes", len(b))
+			}
+			if m := logLine(t, logs); m["reason"] != "malformed" {
+				t.Fatalf("log line %v", m)
+			}
+		})
+	}
+}
+
 func TestCaseAndTrailingDot(t *testing.T) {
 	h := hello(t, "allowed.example")
 	conn, got, _ := tunnel(t, true, "CONNECT", "Allowed.EXAMPLE.:443")
@@ -248,7 +337,7 @@ func TestThroughSmokescreen(t *testing.T) {
 	defer site.Close()
 	_, port, _ := net.SplitHostPort(site.Listener.Addr().String())
 
-	logs := &bytes.Buffer{}
+	logs := &syncBuffer{}
 	conf := smokescreen.NewConfig()
 	conf.Log.Out = logs
 	conf.Log.Formatter = &logrus.JSONFormatter{}
@@ -279,10 +368,69 @@ func TestThroughSmokescreen(t *testing.T) {
 	if err := get("other.example"); err == nil {
 		t.Fatal("another name got through smokescreen")
 	}
-	if atomic.LoadInt32(&hits) != 1 {
-		t.Fatalf("the site saw %d requests, want 1", hits)
+	// A ClientHello in two records reaches the site, which completes the
+	// handshake from it.
+	c, err := net.Dial("tcp", proxy.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	io.WriteString(c, "CONNECT localhost:"+port+" HTTP/1.1\r\nHost: localhost:"+port+"\r\n\r\n")
+	if resp, err := http.ReadResponse(bufio.NewReader(c), nil); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT: %v %v", resp, err)
+	}
+	tc := tls.Client(&fragmentingConn{Conn: c}, &tls.Config{ServerName: "localhost", InsecureSkipVerify: true})
+	if err := tc.Handshake(); err != nil {
+		t.Fatalf("the handshake with a fragmented ClientHello failed: %v", err)
+	}
+	req, _ := http.NewRequest("GET", "https://localhost:"+port+"/", nil)
+	if err := req.Write(tc); err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := http.ReadResponse(bufio.NewReader(tc), req); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET: %v %v", resp, err)
+	}
+	if atomic.LoadInt32(&hits) != 2 {
+		t.Fatalf("the site saw %d requests, want 2", hits)
 	}
 	if !strings.Contains(logs.String(), `"msg":"`+logMessage+`"`) || !strings.Contains(logs.String(), `"tls_name":"other.example"`) {
 		t.Fatalf("no %s line in %s", logMessage, logs.String())
 	}
+}
+
+// fragmentingConn sends the first record written, the ClientHello, as two.
+type fragmentingConn struct {
+	net.Conn
+	done bool
+}
+
+func (c *fragmentingConn) Write(b []byte) (int, error) {
+	if c.done || len(b) < 5 || b[0] != 22 || len(b) != 5+(int(b[3])<<8|int(b[4])) {
+		return c.Conn.Write(b)
+	}
+	c.done = true
+	if _, err := c.Conn.Write(fragment(b, 40)); err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
+// syncBuffer is a log buffer a test can read while smokescreen's goroutines
+// still write to it.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

@@ -13,6 +13,10 @@
 # M, G or T (powers of 1024), or off. "#" starts a comment. A host's own entry
 # wins over a wildcard, and the longest wildcard over a shorter one.
 #
+# A host's own entry is for that host alone. A wildcard's is for all the names
+# it covers together, not for each. The default is for each host on its own,
+# except that the names under one wildcard of the allowlist share it.
+#
 # Unlike egress/baseline.txt, bxn reads this file directly, with no approval
 # step: a change here applies the next time bxn applies a container's policy
 # (`bxn egress ls` notes the change; `bxn egress refresh` applies it). Your

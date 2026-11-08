@@ -527,7 +527,10 @@ cmd_hosts() {
 
 # The decision records, without the probe's, the TLS name check's records
 # (egress/boxen-smokescreen) as decision name-mismatch, and the upload watch's
-# as large-upload (logged, let through) or upload-cut (the cap closed it).
+# as large-upload (logged, let through) or upload-cut (the cap closed it). An
+# upload watch row says which count went over when it isn't the host's own
+# (a wildcard's, or the overflow), and which limit entry applied when it isn't
+# the host's.
 # jq picks fields by name, so a hostile hostname can't forge a column, and
 # control characters in it are replaced so it can't reach a terminal as an
 # escape code.
@@ -564,12 +567,19 @@ cmd_log() {
                + (if $m.enforced == true then "; closed" else "; let through (report)" end)),
               $gen ]
         elif $m.msg == "BOXEN-UPLOAD-LIMIT" then
-          [ ($m.time // "-"), ($m.connect_host | clean(300)),
-            ($m.connect_port | clean(5) | if test("^[0-9]+$") then . else "-" end),
-            (if $m.cut == true then "upload-cut" else "large-upload" end),
-            (($m.window_bytes | size) + " sent in an hour; limit " + ($m.limit_bytes | size)
-             + (if $m.cut == true then "; cut" else "; let through" end)),
-            $gen ]
+          ($m.connect_host | clean(300)) as $h
+          | ($m.counted_for | clean(300)) as $for
+          | ($m.limit_key | clean(300)) as $key
+          | [ ($m.time // "-"), $h,
+              ($m.connect_port | clean(5) | if test("^[0-9]+$") then . else "-" end),
+              (if $m.cut == true then "upload-cut" else "large-upload" end),
+              (($m.window_bytes | size) + " sent in an hour"
+               + (if $for == "overflow" then " across hosts too many to count one by one"
+                  elif $for != "" and $for != $h then " across " + $for else "" end)
+               + "; limit " + ($m.limit_bytes | size)
+               + (if $key != "" and $key != $h then " (" + $key + ")" else "" end)
+               + (if $m.cut == true then "; cut" else "; let through" end)),
+              $gen ]
         elif $m.msg == "CANONICAL-PROXY-DECISION" then
           ($m.requested_host | clean(300)) as $hp
           | select(($hp | split(":")[0]) != $probe)

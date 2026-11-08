@@ -499,6 +499,10 @@ cmd_log() {
     echo "  repository or database out of $c. If you know what it was and it was"
     echo "  legitimate, raise that host's limit for $c:"
     echo "      bxn egress upload-limit $c <host> <size>     (such as 5G)"
+    if awk -F'\t' '($4 == "large-upload" || $4 == "upload-cut") && index($5, " across *.") { found = 1 } END { exit !found }' <<< "$rows"; then
+      echo "  A row that says \"across *.<domain>\" counts every name under that"
+      echo "  wildcard together; give the wildcard itself as the host to raise it."
+    fi
     if awk -F'\t' '$4 == "upload-cut" { found = 1 } END { exit !found }' <<< "$rows"; then
       echo "  The upload cap is on, so the cut uploads failed partway; the tool that"
       echo "  sent them may only have said the connection closed."

@@ -379,6 +379,15 @@ assert_contains "with how much, the limit and that it was let through" "uploads.
 assert_contains "or cut" "dump.example                                  1  2026-10-30T10:30:00Z  249.9M sent in an hour; limit 250M; cut" "$OUT"
 assert_not_contains "no name-mismatch text without one" "Legitimate tools don't do this" "$OUT"
 assert_not_contains "and the table doesn't repeat them" "upload" "$(sed -n '/^HOST /,$p' <<< "$OUT" | sed '$d')"
+assert_not_contains "no wildcard note without a wildcard's row" "counts every name under that" "$OUT"
+log_saved="$(cat "$FAKE_INCUS_STATE/ctl/$E/box/log")"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+  2026-10-30T10:40:00Z n7.cdn.example 443 large-upload "250.1M sent in an hour across *.cdn.example; limit 250M (default); let through" 9 \
+  >> "$FAKE_INCUS_STATE/ctl/$E/box/log"
+run log box
+assert_contains "a wildcard's row says it counts the names under it together" "n7.cdn.example                                1  2026-10-30T10:40:00Z  250.1M sent in an hour across *.cdn.example; limit 250M (default); let through" "$OUT"
+assert_contains "and how to raise it" "A row that says \"across *.<domain>\" counts every name under that" "$OUT"
+printf '%s\n' "$log_saved" > "$FAKE_INCUS_STATE/ctl/$E/box/log"
 run ls
 assert_contains "ls warns on box's line" "WARNING: large uploads to 2 host(s), 1 cut in the last hour: bxn egress log box" "$(grep '^box ' <<< "$OUT")"
 printf '%s\t%s\t%s\n' dump.example 999999999 3 api.anthropic.com 52428800 40 > "$FAKE_INCUS_STATE/ctl/$E/box/uploads"
