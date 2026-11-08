@@ -1,0 +1,23 @@
+boxen.create
+  s_7d25aa5b984683::t_677e0958f73413 57
+tests/net_test.sh
+  s_7d25aa5b984683::t_677e0958f73413 194
+README.md
+  s_7d25aa5b984683::t_677e0958f73413 150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "56d62384494d91efa85ced40e4c0763b31bcc4c0",
+  "prompts": {},
+  "sessions": {
+    "s_7d25aa5b984683": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71aaa015-6a46-4cf4-9924-75716400660b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
