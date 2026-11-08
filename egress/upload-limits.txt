@@ -15,7 +15,8 @@
 #
 # A host's own entry is for that host alone. A wildcard's is for all the names
 # it covers together, not for each. The default is for each host on its own,
-# except that the names under one wildcard of the allowlist share it.
+# except that the names under one wildcard of the allowlist share it. Past
+# 10,000 hosts counted on their own in an hour, the rest share one count.
 #
 # Unlike egress/baseline.txt, bxn reads this file directly, with no approval
 # step: a change here applies the next time bxn applies a container's policy

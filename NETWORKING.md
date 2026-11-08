@@ -83,7 +83,7 @@ When a count first goes over its limit, the proxy logs it once, naming the host 
 
 - **Small secrets.** A token or a key is a few dozen bytes. It passes any limit.
 - **Slow uploads.** Anything under the limit in every hour passes, so 200M an hour gets out 4.8G a day without a warning.
-- **Spreading it out.** Hosts listed one by one, in the allowlist or the limits, each have their own count: sending to several of them keeps each under its limit. Names under one wildcard share a count, so making up more of them doesn't help.
+- **Spreading it out.** A host with its own entry in the limits has its own count, and so does each host on the default limit that isn't under a wildcard of the allowlist: sending to several of them keeps each under its limit. Names under one wildcard of the limits share that wildcard's count, and names on the default limit under one wildcard of the allowlist share one, so making up more of them doesn't help.
 - **Plain HTTP.** Only HTTPS tunnels are counted. Plain HTTP requests (`HTTP_PROXY`) aren't.
 - **A new proxy generation starts from zero.** Counts live in the proxy's memory. Any change to the container's policy (a host allowed, a mode or limit changed, a proxy update) starts a new generation with no count; older generations keep counting the connections they still serve, each on its own.
 - **The cap needs `enforce`, and someone to turn it on.** It's off by default, so a warning comes after the data has gone.
