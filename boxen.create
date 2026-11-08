@@ -800,7 +800,7 @@ _reset_plugin_state() {
   PLUGIN_ID="" PLUGIN_NAME="" PLUGIN_DESC="" PLUGIN_DEFAULT=0
   PLUGIN_CLI_FLAGS="" PLUGIN_NEEDS_PROMPT=0 PLUGIN_RUN_ON_LAUNCH=0
   PLUGIN_REQUIRES="" PLUGIN_AGENT_COMMAND="" PLUGIN_PHASE="" PLUGIN_EGRESS_ALLOW="" PLUGIN_MIN_MEMORY=""
-  PLUGIN_LOGIN_COMMAND=""
+  PLUGIN_LOGIN_COMMAND="" PLUGIN_CONTAINER_WARNING=""
   unset -f plugin_prompt plugin_is_installed plugin_install plugin_on_launch plugin_proxy 2>/dev/null || true
 }
 
@@ -1639,6 +1639,20 @@ done
 log "Agent: $(agent_label "$AGENT_SLOT")"
 log "Plugins selected: ${_sel_names:-none}"
 unset _i _sel_names
+
+# A plugin that is safer in a VM says why when it's picked for a container
+# (PLUGIN_CONTAINER_WARNING): now, while the build can still be stopped and
+# run again with --vm, and again when the build ends.
+CONTAINER_WARNINGS=()
+if [[ "$IS_VM" != "1" ]]; then
+  for ((_i=0; _i<PLUGIN_COUNT; _i++)); do
+    [[ "${_P_SELECTED[$_i]}" == "1" ]] || continue
+    _w="$( _reset_plugin_state; source "${_P_FILE[$_i]}"; echo "${PLUGIN_CONTAINER_WARNING:-}" )"
+    [[ -z "$_w" ]] || CONTAINER_WARNINGS+=("${_P_NAME[$_i]}: $_w")
+  done
+fi
+for _w in ${CONTAINER_WARNINGS[@]+"${CONTAINER_WARNINGS[@]}"}; do warn "$_w"; done
+unset _i _w
 resolve_memory
 
 # ---------------------------------------------------------------------------
@@ -2170,6 +2184,12 @@ for entry in "${PLUGINS[@]}"; do
     fi
   fi
 done
+if [[ ${#CONTAINER_WARNINGS[@]} -gt 0 ]]; then
+  echo ""
+  echo "Notes:"
+  for _w in "${CONTAINER_WARNINGS[@]}"; do echo "  $_w"; done
+  unset _w
+fi
 echo "========================================"
 echo ""
 echo "Shell in:"

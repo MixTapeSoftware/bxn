@@ -6,6 +6,8 @@ PLUGIN_DESC="Container runtime & compose (the docker group is root inside the co
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--docker"
 PLUGIN_RUN_ON_LAUNCH=1
+# A VM runs Docker on its own kernel, with nothing relaxed (plugin_install).
+PLUGIN_CONTAINER_WARNING="Docker in a container needs its sandbox relaxed (nesting, syscall interception), on the kernel it shares with the host. With --vm, Docker gets its own kernel and nothing is relaxed."
 
 plugin_is_installed() {
   incus exec "$CONTAINER_NAME" -- sh -c 'command -v docker' &>/dev/null

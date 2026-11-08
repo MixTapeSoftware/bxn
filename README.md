@@ -368,6 +368,7 @@ Optional extras:
 - `PLUGIN_PHASE=open|locked` — when it installs under an allowlist: `open`, before the container is locked, or `locked`, after, with the workspace. Plugins that prompt (they usually take a credential) default to `locked`, others to `open`
 - `PLUGIN_REQUIRES="other-id ..."` — auto-select these plugins whenever this one is selected (single level: a required plugin's own requirements aren't chased)
 - `PLUGIN_MIN_MEMORY="8GiB"` — the instance gets at least this much memory when the plugin is selected, unless `--memory` asks for more. The build is refused if the host can't back it with 2GiB to spare. The Supabase serve plugin sets 8GiB for the local Supabase stack
+- `PLUGIN_CONTAINER_WARNING="..."` — said when the plugin is picked for a container rather than a VM: once with the selection, while the build can still be stopped and run again with `--vm`, and again at the end. For a tool that needs the container's sandbox relaxed; the Docker plugin sets it
 - `plugin_proxy()` — for a tool that ignores `HTTP_PROXY`/`HTTPS_PROXY` and keeps proxy settings in its own file. Called when the container is locked behind the egress proxy with `PROXY_URL` and `PROXY_NO_PROXY` set, and with an empty `PROXY_URL` when a template launches without an allowlist, to remove them. Runs for every installed plugin, selected or not. Docker's plugin is the example
 
 **Overriding a built-in:** define a plugin in your user dir with the same `PLUGIN_ID` as a built-in. You'll see a `[!] Plugin 'foo' from ... overrides ...` warning at discovery time.
@@ -529,6 +530,12 @@ more raises it, and a figure the host can't back is refused.
 `security.nesting` or syscall interception — those config keys are
 container-only and would be rejected by Incus), and Tailscale uses the VM's
 native `/dev/net/tun` instead of a device passthrough.
+
+**Docker belongs in a VM.** In a container, Docker needs nesting and syscall
+interception, which relax the sandbox on the kernel the container shares with
+the host. In a VM it runs on the VM's own kernel, and a breakout reaches that
+kernel, not the host's. `bxn -c --docker` without `--vm` says so when it
+starts and again when it ends.
 
 **Templates work the same.** Build a VM template with `--vm`; launches from it
 are VMs automatically, because a published VM image can only launch as a VM.
