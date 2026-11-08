@@ -47,7 +47,8 @@ Options:
   -p, --path PATH           Host directory to copy in (default: current directory)
   -w, --workspace PATH      Where the copy goes in the container (default: /workspace)
   -f, --from TEMPLATE       Launch from a saved template (shorthand for --image incus-init/TEMPLATE)
-  -i, --image IMAGE         Base image override (default: ubuntu/24.04)
+  -i, --image IMAGE         Base image override (default: images:ubuntu/24.04);
+                            incus-init/NAME is a template, as --from NAME
   -t, --template            Save container as a reusable local template (empty workspace)
   --colima-cpus N           Colima VM CPUs (default: 4, macOS only)
   --colima-memory N         Colima VM memory in GB (default: 8, macOS only)
@@ -64,6 +65,7 @@ Options:
   --agent NAME              The coding agent: claude, codex, grok, or shell for none
   --name NAME               Use NAME exactly, instead of HANDLE-AGENT-PROJECT
   --no-tui                  Skip interactive plugin selector, use defaults
+                            (also the case without a terminal)
   --insecure-network        Use the default bridge: no isolation from other
                             instances or the host (also BOXEN_INSECURE_NETWORK=1)
   --egress MODE             Internet allowlist: enforce (default), report or off
@@ -112,7 +114,7 @@ wait_for_container() {
   local name="$1" timeout="${2:-30}" elapsed=0
   local ready=0
   while [[ $elapsed -lt $timeout ]]; do
-    if incus exec "$name" -- true >/dev/null 2>&1; then
+    if incus exec "$name" -- true </dev/null >/dev/null 2>&1; then
       ready=1
       break
     fi
@@ -139,7 +141,7 @@ wait_for_network() {
   fi
   local ready=0
   while [[ $elapsed -lt $timeout ]]; do
-    if incus exec "$name" -- sh -c "$probe"; then
+    if incus exec "$name" -- sh -c "$probe" </dev/null; then
       ready=1
       break
     fi
@@ -836,12 +838,18 @@ _run_plugin_prompts() {
 # parent records the failure and moves on. Failures are listed in the summary.
 FAILED_PLUGIN_NAMES=()
 FAILED_PLUGIN_IDS=()
+#
+# The hook gets no terminal on stdin: its prompts ran before the build. On
+# one, incus exec would take Ctrl-C to the command inside, and the build
+# would see a failed plugin and go on. Exit 130 is that interrupt all the
+# same, so it stops the build.
 _run_plugin_hook() {
   local hook="$1" rc=0
   set +e
-  ( set -e; "$hook" )
+  ( set -e; "$hook" ) </dev/null
   rc=$?
   set -e
+  [[ $rc -ne 130 ]] || exit 130
   if [[ $rc -ne 0 ]]; then
     warn "$PLUGIN_NAME: $hook failed (exit $rc) — continuing with remaining plugins"
     FAILED_PLUGIN_NAMES+=("$PLUGIN_NAME")
@@ -928,8 +936,8 @@ stash_tailscale_state() {
     *) error "Could not stop tailscaled in $CONTAINER_NAME. No template saved: it might write the node key back." ;;
   esac
   TS_STATE_BACKUP="$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/boxen-tailscale.XXXXXX")"
-  incus exec "$CONTAINER_NAME" -- tar -C /var/lib -cf - tailscale > "$TS_STATE_BACKUP"
-  incus exec "$CONTAINER_NAME" -- rm -rf /var/lib/tailscale
+  incus exec "$CONTAINER_NAME" -- tar -C /var/lib -cf - tailscale </dev/null > "$TS_STATE_BACKUP"
+  incus exec "$CONTAINER_NAME" -- rm -rf /var/lib/tailscale </dev/null
 }
 
 # Starts the container unless it's running, and waits until it answers.
@@ -953,7 +961,7 @@ restore_tailscale_state() {
   # stopped.
   start_and_wait || return 1
   # tailscaled came back up at boot with a fresh, logged-out state; replace it.
-  incus exec "$CONTAINER_NAME" -- systemctl stop tailscaled 2>/dev/null || true
+  incus exec "$CONTAINER_NAME" -- systemctl stop tailscaled </dev/null 2>/dev/null || true
   incus exec "$CONTAINER_NAME" -- tar -C /var/lib -xf - < "$TS_STATE_BACKUP" || return 1
   # The state is back in place, so the host copy of the node key can go.
   rm -f "$TS_STATE_BACKUP"
@@ -1001,7 +1009,7 @@ copy_workspace() {
   local ws_q
   printf -v ws_q '%q' "$CONTAINER_WORKSPACE"
   incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c \
-    "git config --global --add safe.directory $ws_q 2>/dev/null || true"
+    "git config --global --add safe.directory $ws_q 2>/dev/null || true" </dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -1218,11 +1226,16 @@ lock_build() {
 # - the proxy settings of tools that keep their own (plugin_proxy);
 # - the login banner and the coding agents' note.
 finish_locked_build() {
+  local url
   incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -s /bin/sh -c 'sh -s' <<'GITCFG' || warn "Could not point github remotes at HTTPS"
 git config --global url."https://github.com/".insteadOf "git@github.com:"
 git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
 GITCFG
-  _run_plugin_proxy_hooks "$(egress_proxy_url "$CONTAINER_NAME")"
+  # Checked as egress_write_proxy_env checks it: to the hooks, an empty URL
+  # means "remove the proxy settings".
+  url="$(egress_proxy_url "$CONTAINER_NAME")" || url=""
+  [[ "$url" =~ ^http://[0-9.]+:[0-9]+$ ]] || error "Could not work out $CONTAINER_NAME's proxy address for its tools' own proxy settings"
+  _run_plugin_proxy_hooks "$url"
   egress_write_notices "$CONTAINER_NAME" "$HOST_USER"
   egress_commit "$CONTAINER_NAME"
   incus config set "$CONTAINER_NAME" user.boxen.egress.build=done
@@ -1290,7 +1303,7 @@ save_template() {
   # misresolved CONTAINER_WORKSPACE from ever expanding to `rm -rf /`.
   if [[ -n "$CONTAINER_WORKSPACE" && "$CONTAINER_WORKSPACE" != "/" ]]; then
     log "Emptying workspace so the template stays a clean base..."
-    incus exec "$CONTAINER_NAME" -- rm -rf "$CONTAINER_WORKSPACE"
+    incus exec "$CONTAINER_NAME" -- rm -rf "$CONTAINER_WORKSPACE" </dev/null
   fi
 
   stash_tailscale_state
@@ -1484,10 +1497,16 @@ LOCKED_BUILD=0
 [[ "$EGRESS_MODE" != "off" ]] && LOCKED_BUILD=1
 
 # ---------------------------------------------------------------------------
-# Detect if launching from a local base image (skip provisioning)
+# Detect if launching from a local base image (skip provisioning). A template
+# is one bxn saved: incus-init/NAME. Any other image is provisioned, from
+# whichever remote it names; one with no remote is looked for here first.
 # ---------------------------------------------------------------------------
 FROM_BASE_IMAGE=0
-if [[ "$BASE_IMAGE" != images:* ]]; then
+if [[ "$BASE_IMAGE" != incus-init/* && "$BASE_IMAGE" != local:incus-init/* && "$BASE_IMAGE" != *:* ]] &&
+   ! incus image info "$BASE_IMAGE" &>/dev/null; then
+  error "No image '$BASE_IMAGE' in the local image store. One from the image server is written with its remote: images:$BASE_IMAGE"
+fi
+if [[ "$BASE_IMAGE" == incus-init/* || "$BASE_IMAGE" == local:incus-init/* ]]; then
   FROM_BASE_IMAGE=1
   if ! incus image info "$BASE_IMAGE" &>/dev/null; then
     error "Template image '$BASE_IMAGE' not found. Run 'incus image list' to see available templates."
@@ -1546,6 +1565,22 @@ fi
 # ---------------------------------------------------------------------------
 # TUI plugin selector
 # ---------------------------------------------------------------------------
+# The pickers read keys from a terminal. Without one (cron, CI, input from a
+# pipe or /dev/null) a read would end the run with no word said, or take
+# the input for keystrokes: take the defaults, as --no-tui does.
+if [[ "$NO_TUI" == "0" ]] && ! [[ -t 0 && -t 2 ]]; then
+  NO_TUI=1
+  log "No terminal for the pickers, so the defaults are taken, as with --no-tui"
+fi
+# The pickers hide the cursor, and a RETURN trap doesn't run when a signal
+# ends the script: until the build's own traps take over below, any way out
+# shows it again.
+if [[ "$NO_TUI" == "0" ]]; then
+  trap 'tput cnorm 2>/dev/null || true' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+fi
 ask_plugins_source
 if [[ -n "$SOURCE_PLUGINS_DIR" ]]; then
   log "Optional plugins from $PLUGINS_SOURCE_SHOWN${PLUGINS_SOURCE_COMMIT:+ at ${PLUGINS_SOURCE_COMMIT:0:12}} ($PLUGINS_SOURCE_FROM)"
@@ -1877,7 +1912,7 @@ incus exec "$CONTAINER_NAME" -- sh -c "
   # plugin installs, and by the exit trap if the build stops early.
   echo '$HOST_USER ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/$HOST_USER
   chmod 0440 /etc/sudoers.d/$HOST_USER
-"
+" </dev/null
 
 # ---------------------------------------------------------------------------
 # Disable mise's gix-based git cloner. gix trips on some asdf plugin repos
@@ -1922,7 +1957,7 @@ GHSTACK
 
 # Final readiness check
 wait_for_container "$CONTAINER_NAME" "$READY_TIMEOUT"
-incus exec "$CONTAINER_NAME" -- id "$HOST_USER" >/dev/null 2>&1 \
+incus exec "$CONTAINER_NAME" -- id "$HOST_USER" </dev/null >/dev/null 2>&1 \
   || error "User $HOST_USER does not exist. User creation may have failed."
 
 wait_for_network "$CONTAINER_NAME" "$READY_TIMEOUT"
@@ -1980,7 +2015,7 @@ revoke_build_sudo || error "Could not revoke build-time sudo"
 # reached it. A cloned repository's own config counts.
 if workspace_has_mise_config; then
   log "Trusting workspace mise config..."
-  incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c "cd $WORKSPACE_Q && mise trust"
+  incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c "cd $WORKSPACE_Q && mise trust" </dev/null
 
   # Pre-clone asdf plugins with system git before `mise install`.
   # mise's built-in gix cloner trips on some plugin repos (e.g. asdf-php)
@@ -2046,8 +2081,12 @@ PRECLONE
   log "Running mise install for workspace..."
   # Non-fatal: a broken tool version in the workspace config shouldn't nuke an
   # otherwise-complete instance (plugins and env are already applied by now).
-  incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c "cd $WORKSPACE_Q && mise install" || \
+  incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c "cd $WORKSPACE_Q && mise install" </dev/null || {
+    _rc=$?
+    # 130: interrupted (Ctrl-C reached the command, not this script). Stop.
+    [[ $_rc -ne 130 ]] || exit 130
     warn "mise install failed — fix tool versions and rerun 'mise install' inside the instance"
+  }
 fi
 
 # Expose mise shims to coding agents and other non-interactive shells
@@ -2066,7 +2105,7 @@ incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c '
       ln -sf "$shim" "$HOME/.local/bin/$(basename "$shim")"
     done
   fi
-'
+' </dev/null
 
 
 # ---------------------------------------------------------------------------
