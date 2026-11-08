@@ -22,10 +22,13 @@ COLIMA_PROFILE="${COLIMA_PROFILE:-boxen}"
 # would do first, and stops there, since everything after needs Incus.
 # ---------------------------------------------------------------------------
 # The profile's status (Running, Stopped), or empty when there's no such
-# profile. Its name is matched exactly: boxen2 is not boxen.
+# profile. Its name is matched exactly: boxen2 is not boxen. A colima list
+# that fails reads as no profile, as it did before, so the next step (creating
+# it) runs and colima says what is wrong, instead of set -e ending the run
+# here without a word.
 colima_profile_status() {
   command -v colima >/dev/null 2>&1 || return 0
-  colima list 2>/dev/null | awk -v p="$COLIMA_PROFILE" '$1 == p { print $2; exit }'
+  colima list 2>/dev/null | awk -v p="$COLIMA_PROFILE" '$1 == p { print $2; exit }' || true
 }
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then

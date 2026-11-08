@@ -165,6 +165,14 @@ rm -f "$SANDBOX/colima.log"
 PATH="$SANDBOX/mac:$PATH" create web --dry-run --no-tui </dev/null
 assert_contains "boxen2 running, boxen stopped: boxen is taken as stopped" "The real run would first start the Colima profile 'boxen'" "$OUT"
 
+# colima list itself fails: the dry run goes on, saying it would create it.
+printf '#!/bin/sh\necho "colima $*" >> "%s/colima.log"\n[ "$1" = list ] && exit 1\nexit 0\n' "$SANDBOX" > "$SANDBOX/mac/colima"
+fresh
+rm -f "$SANDBOX/colima.log"
+PATH="$SANDBOX/mac:$PATH" create web --dry-run --no-tui </dev/null
+assert_eq "a failing colima list doesn't end the run" "0" "$RC"
+assert_contains "…it says it would create the profile" "create the Colima profile 'boxen'" "$OUT"
+
 # ===========================================================================
 echo "which images are templates"
 # ===========================================================================
