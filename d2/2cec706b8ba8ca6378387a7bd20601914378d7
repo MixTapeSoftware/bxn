@@ -20,6 +20,7 @@ tests/egress_cli_test.sh
   s_72cef02a544353::t_f5cbae7984dce0 382-390
 tests/egress_units_test.sh
   s_72cef02a544353::t_d606f3dd01cb31 61-65,80-85
+  s_05f0148903779a::t_824a59462f215b 87
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -27,6 +28,14 @@ tests/egress_units_test.sh
   "base_commit_sha": "d22cec706b8ba8ca6378387a7bd20601914378d7",
   "prompts": {},
   "sessions": {
+    "s_05f0148903779a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d4853203-8bdb-457a-9c09-d34937aaa670",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    },
     "s_72cef02a544353": {
       "agent_id": {
         "tool": "claude",
