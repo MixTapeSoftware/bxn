@@ -1,0 +1,29 @@
+tests/net_test.sh
+  s_7d25aa5b984683::t_02c53de9c6d592 188-203
+boxen.create
+  s_7d25aa5b984683::t_8166cbb49e7ba7 56-58,61,282-285,1399-1403,1524-1526,1528,1530-1532,1545
+  s_7d25aa5b984683::t_148150243cf3a7 1529,1533
+tests/memory_test.sh
+  s_7d25aa5b984683::t_02c53de9c6d592 107-117
+  s_7d25aa5b984683::t_5ab8af26415ff2 71,77,82,89,94,97,100,129,131,135,140,144,147,161,165,170,184
+README.md
+  s_7d25aa5b984683::t_56f5d99a25eb37 54-55,555-556
+  s_7d25aa5b984683::t_bb03b53e7613a6 53,173
+  s_7d25aa5b984683::t_c58d625eb9240e 149-151,160,513-516,519-522,528-529,538-540,543-546,549-552
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cf278f44d361d8724beafd9f2d43b9a5f56ecf58",
+  "prompts": {},
+  "sessions": {
+    "s_7d25aa5b984683": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71aaa015-6a46-4cf4-9924-75716400660b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
