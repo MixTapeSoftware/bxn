@@ -13,6 +13,9 @@
 // BOXEN_TLS_NAME_CHECK, set by boxen-proxy-run, chooses what happens:
 // enforce (the default) closes such a tunnel, report logs it and lets it
 // through, off skips the check.
+//
+// The same hook counts what each tunnel sends, for the upload watch in
+// uploads.go, in every mode.
 package main
 
 import (
@@ -37,9 +40,14 @@ import (
 // The one log line each refused tunnel writes; boxen-egress-ctl looks for it.
 const logMessage = "BOXEN-TLS-NAME-CHECK"
 
-// TLS allows a record body of at most 16 KB (RFC 8446, 5.1), so no more is
-// held back than that and its 5-byte header.
+// TLS allows a record body of at most 16 KB (RFC 8446, 5.1).
 const maxRecord = 16384
+
+// A client may split its ClientHello across several handshake records. They
+// are held back until it is whole, but never more than four full records'
+// worth, which is crypto/tls's own limit on a ClientHello and far more than
+// any client sends (a few KB, post-quantum key shares included).
+const maxHeld = 4 * (5 + maxRecord)
 
 // As upstream: the role is the client certificate's name. bxn uses none, so
 // allow_missing_role applies.
@@ -61,6 +69,10 @@ func main() {
 	if mode != "enforce" && mode != "report" && mode != "off" {
 		logrus.Fatalf("BOXEN_TLS_NAME_CHECK must be enforce, report or off, not %q", mode)
 	}
+	watch, err := uploadWatchFromEnv(mode == "enforce")
+	if err != nil {
+		logrus.Fatalf("Could not read the upload limits: %v", err)
+	}
 	conf, err := cmd.NewConfiguration(nil, nil)
 	if err != nil {
 		logrus.Fatalf("Could not create configuration: %v", err)
@@ -72,16 +84,19 @@ func main() {
 	conf.Log.Formatter = &logrus.JSONFormatter{}
 	log.SetOutput(&smokescreen.Log2LogrusWriter{Entry: conf.Log.WithField("stdlog", "1")})
 	log.SetFlags(0)
-	if mode != "off" {
-		conf.ProxyDialTimeout = nameCheckDialer(mode == "enforce", conf.Log)
+	if watch != nil {
+		watch.log = conf.Log
+		watch.allowWildcards(conf.EgressACL)
 	}
+	conf.ProxyDialTimeout = tunnelDialer(mode, watch, conf.Log)
 	smokescreen.StartWithConfig(conf, nil)
 }
 
-// nameCheckDialer dials as smokescreen does without the hook, and wraps the
-// connection of each CONNECT tunnel in a checkedConn. Plain HTTP requests go
+// tunnelDialer dials as smokescreen does without the hook, and wraps the
+// connection of each CONNECT tunnel: in a countedConn when there is an upload
+// watch, then in a checkedConn unless the mode is off. Plain HTTP requests go
 // through smokescreen whole, so it already sees their host; they're untouched.
-func nameCheckDialer(enforce bool, logger *logrus.Logger) func(context.Context, string, string, time.Duration) (net.Conn, error) {
+func tunnelDialer(mode string, watch *uploadWatch, logger *logrus.Logger) func(context.Context, string, string, time.Duration) (net.Conn, error) {
 	return func(ctx context.Context, network, address string, timeout time.Duration) (net.Conn, error) {
 		pctx, _ := ctx.Value(goproxy.ProxyContextKey).(*goproxy.ProxyCtx)
 		conn, err := net.DialTimeout(network, address, timeout)
@@ -94,20 +109,27 @@ func nameCheckDialer(enforce bool, logger *logrus.Logger) func(context.Context, 
 			conn.Close()
 			return nil, err
 		}
-		return &checkedConn{Conn: conn, host: dest.Host, port: dest.Port, enforce: enforce, log: logger}, nil
+		if watch != nil {
+			host := strings.ToLower(strings.TrimSuffix(dest.Host, "."))
+			conn = &countedConn{Conn: conn, host: host, port: dest.Port, watch: watch}
+		}
+		if mode == "off" {
+			return conn, nil
+		}
+		return &checkedConn{Conn: conn, host: dest.Host, port: dest.Port, enforce: mode == "enforce", log: logger}, nil
 	}
 }
 
 // checkedConn holds back what the client writes until it has the whole
-// first TLS record, then forwards it only if the record's ClientHello names
-// the tunnel's host. goproxy writes from one goroutine, so no lock is needed.
+// ClientHello, then forwards it only if the ClientHello names the tunnel's
+// host. goproxy writes from one goroutine, so no lock is needed.
 type checkedConn struct {
 	net.Conn
 	host    string
 	port    int
 	enforce bool
 	log     *logrus.Logger
-	held    []byte
+	hello   helloRecords
 	done    bool
 	err     error
 }
@@ -119,14 +141,14 @@ func (c *checkedConn) Write(b []byte) (int, error) {
 		}
 		return c.Conn.Write(b)
 	}
-	c.held = append(c.held, b...)
-	name, reason, ok := checkHello(c.held, c.host)
+	c.hello.held = append(c.hello.held, b...)
+	name, reason, ok := c.hello.check(c.host)
 	if !ok {
-		return len(b), nil // not the whole record yet
+		return len(b), nil // not the whole ClientHello yet
 	}
 	c.done = true
-	held := c.held
-	c.held = nil
+	held := c.hello.held
+	c.hello = helloRecords{}
 	if reason != "" {
 		c.report(name, reason)
 		if c.enforce {
@@ -142,28 +164,45 @@ func (c *checkedConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// checkHello reads the first TLS record in b. ok is false while more bytes
-// are needed. reason is empty when the ClientHello names host, and otherwise
-// says why the tunnel is refused.
-func checkHello(b []byte, host string) (name, reason string, ok bool) {
+// helloRecords reads the records a client writes first, as they arrive,
+// until they hold a whole handshake message: the ClientHello.
+type helloRecords struct {
+	held []byte // everything written so far
+	end  int    // held[:end] is whole records, read into msg
+	msg  []byte // the handshake bytes of those records
+}
+
+// check reads what has arrived since the last call. ok is false while more
+// bytes are needed. reason is empty when the ClientHello names host, and
+// otherwise says why the tunnel is refused.
+func (r *helloRecords) check(host string) (name, reason string, ok bool) {
+	b := r.held
 	// Every TLS connection starts with a handshake record (type 22). Anything
 	// else is another protocol, where the proxy can't see a name at all.
 	if len(b) > 0 && b[0] != 22 {
 		return "", "not_tls", true
 	}
-	if len(b) < 5 {
-		return "", "", false
+	for !wholeMessage(r.msg) {
+		if len(r.msg) >= 4 && 4+msgLen(r.msg) > maxHeld {
+			return "", "malformed", true
+		}
+		if len(b)-r.end < 5 {
+			return r.more()
+		}
+		// Until the ClientHello is whole, a client sends only handshake
+		// records, none empty (RFC 8446, 5.1). A record longer than TLS
+		// allows isn't TLS; refusing it also caps what is held back.
+		n := int(b[r.end+3])<<8 | int(b[r.end+4])
+		if b[r.end] != 22 || n == 0 || n > maxRecord {
+			return "", "malformed", true
+		}
+		if len(b)-r.end < 5+n {
+			return r.more()
+		}
+		r.msg = append(r.msg, b[r.end+5:r.end+5+n]...)
+		r.end += 5 + n
 	}
-	// A record longer than TLS allows isn't TLS; refusing it also caps what
-	// is held back.
-	n := int(b[3])<<8 | int(b[4])
-	if n > maxRecord {
-		return "", "malformed", true
-	}
-	if len(b) < 5+n {
-		return "", "", false
-	}
-	name, err := helloName(b[:5+n])
+	name, err := helloName(b[:r.end])
 	switch {
 	case err != nil:
 		// Not a ClientHello crypto/tls accepts, so a server might read
@@ -179,13 +218,26 @@ func checkHello(b []byte, host string) (name, reason string, ok bool) {
 	return name, "", true
 }
 
-// helloName has crypto/tls parse the ClientHello in rec, so this file holds
-// no TLS parser of its own. The handshake stops as soon as the server name
+// more waits for more bytes, unless as much as may be held back already is.
+func (r *helloRecords) more() (name, reason string, ok bool) {
+	if len(r.held) >= maxHeld {
+		return "", "malformed", true
+	}
+	return "", "", false
+}
+
+// A handshake message is a type byte and a 3-byte length, then the body.
+func msgLen(m []byte) int { return int(m[1])<<16 | int(m[2])<<8 | int(m[3]) }
+
+func wholeMessage(m []byte) bool { return len(m) >= 4 && len(m) >= 4+msgLen(m) }
+
+// helloName has crypto/tls parse the ClientHello in recs, which may be split
+// across several records, so this file holds no TLS parser of its own. The handshake stops as soon as the server name
 // is known; nothing is ever sent to the client.
-func helloName(rec []byte) (string, error) {
+func helloName(recs []byte) (string, error) {
 	var name string
 	stop := errors.New("stop")
-	srv := tls.Server(&replayConn{r: bytes.NewReader(rec)}, &tls.Config{
+	srv := tls.Server(&replayConn{r: bytes.NewReader(recs)}, &tls.Config{
 		GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
 			name = h.ServerName
 			return nil, stop
