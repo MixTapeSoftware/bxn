@@ -364,14 +364,31 @@ check_egress() {
     grep -qx "$eg" <<< "$answered" || continue
     found="$(awk -F'\t' -v e="$eg" -v a="$name" '$1 == e && $2 == a {sub(/^[^\t]*\t/, ""); print}' <<< "$ctl_all")"
     if [[ -z "$found" ]]; then
-      bad "$eg has no proxy for $name, so $name has no internet" \
-        "incus exec $eg -- $BOXEN_EGRESS_CTL add $name $port; then bxn egress refresh $name"
+      bad "$eg has no proxy for $name, so $name has no internet" "bxn egress refresh $name"
+    elif [[ "$(cut -f2 <<< "$found")" != "$port" ]]; then
+      bad "$name's proxy in $eg listens on $(cut -f2 <<< "$found"), not its port $port, so $name has no internet" "bxn egress refresh $name"
+    elif [[ "$(cut -f6 <<< "$found")" == stopping ]]; then
+      bad "$name's proxy in $eg didn't finish narrowing: older proxies still run with the earlier allowlist" "bxn egress refresh $name"
     elif [[ "$(inst_field "$row" 2)" == RUNNING && "$(cut -f6 <<< "$found")" != yes ]]; then
       bad "$name's proxy in $eg isn't listening, so $name has no internet" "bxn egress refresh $name"
     else
       ok "$name's proxy in $eg is in place"
     fi
   done
+
+  # Two containers on one port of an egress container: each one's rules let
+  # it reach the other's proxy. A rebuilt egress container did this once.
+  local dups
+  dups="$(for row in ${INSTANCES[@]+"${INSTANCES[@]}"}; do
+            [[ "$(inst_field "$row" 5)" != - && "$(inst_field "$row" 7)" != - ]] || continue
+            printf '%s\t%s\t%s\n' "$(inst_field "$row" 5)" "$(inst_field "$row" 7)" "$(inst_field "$row" 1)"
+          done | awk -F'\t' '{ k = $1 ":" $2; n[k]++; who[k] = who[k] (n[k] > 1 ? " and " : "") $3 }
+                             END { for (k in n) if (n[k] > 1) print k "\t" who[k] }')"
+  while IFS=$'\t' read -r k who; do
+    [[ -n "$k" ]] || continue
+    bad "$who share proxy port ${k##*:} in ${k%:*}, so each can reach the other's proxy" \
+      "delete all but one (bxn rm), then create them again"
+  done <<< "$dups"
 
   # Rule sets bxn made for containers that are gone. They block nothing.
   acls="$(incus network acl list --format csv 2>/dev/null | cut -d, -f1)" || acls=""

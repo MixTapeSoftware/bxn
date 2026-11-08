@@ -53,7 +53,7 @@ egress_read_hosts() {
   [[ -f "$file" ]] || return 0
   norm="$(awk '{ sub(/#.*/, ""); sub(/^[ \t\r]+/, ""); sub(/[ \t\r]+$/, ""); if ($0 == "") next
                  $0 = tolower($0); sub(/\.$/, ""); if (length($0) > 253) $0 = "!" $0
-                 print NR "\t" $0 }' "$file")"
+                 print NR "\t" $0 }' "$file")" || error "Could not read $file"
   [[ -n "$norm" ]] || return 0
   bad="$(grep -vE "^[0-9]+	$EGRESS_HOST_RE\$" <<< "$norm" | head -1 || true)"
   [[ -z "$bad" ]] || error "$file line ${bad%%	*}: not a hostname bxn accepts: ${bad#*	}"
@@ -76,16 +76,27 @@ egress_ensure_approved() {
 
 # Every host an agent may reach, sorted: the approved baseline, the user's
 # additions, the plugins' additions recorded on the agent, and the agent's own.
+# Fails when any part can't be read, such as a list with a bad line: a policy
+# built from the rest would drop hosts without a word. Callers check, since
+# error() inside $(...) ends only that subshell.
 # Usage: egress_hosts <agent>
 egress_hosts() {
-  local agent="$1"
+  local agent="$1" approved user plugins own
   egress_ensure_approved
-  {
-    egress_read_hosts "$EGRESS_APPROVED"
-    egress_read_hosts "$EGRESS_USER_HOSTS"
-    egress_split "$(incus config get "$agent" user.boxen.egress.plugin-allow 2>/dev/null)"
-    egress_split "$(incus config get "$agent" user.boxen.egress.allow 2>/dev/null)"
-  } | LC_ALL=C sort -u
+  approved="$(egress_read_hosts "$EGRESS_APPROVED")" || return 1
+  user="$(egress_read_hosts "$EGRESS_USER_HOSTS")" || return 1
+  plugins="$(incus config get "$agent" user.boxen.egress.plugin-allow 2>/dev/null)" || return 1
+  own="$(incus config get "$agent" user.boxen.egress.allow 2>/dev/null)" || return 1
+  { printf '%s\n' "$approved" "$user"; egress_split "$plugins"; egress_split "$own"; } |
+    sed '/^$/d' | LC_ALL=C sort -u
+}
+
+# The policy identity of an agent's hosts under a mode, or a failure.
+# Usage: egress_hosts_id <agent> <mode>
+egress_hosts_id() {
+  local hosts
+  hosts="$(egress_hosts "$1")" || return 1
+  printf '%s\n' "$hosts" | egress_policy_id "$2"
 }
 
 egress_sha256() {
@@ -177,9 +188,15 @@ egress_ctl() { local e="$1"; shift; incus exec "$e" -- "$BOXEN_EGRESS_CTL" "$@";
 # Usage: egress_ensure <egress>
 egress_ensure() {
   local egress="$1" ip
-  if ! incus info "$egress" &>/dev/null; then
+  if incus info "$egress" &>/dev/null; then
+    # Only one bxn made: proxies never run in an agent or other container
+    # that happens to have the name.
+    [[ "$(incus config get "$egress" user.boxen.role 2>/dev/null)" == egress ]] ||
+      error "$egress exists but isn't an egress container bxn made. Rename or delete it, or use another --egress-container name."
+  else
     log "Creating egress container: $egress"
-    ip="$(net_next_address)"
+    ip="$(net_next_address)" && [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]] ||
+      error "Could not find a free address for $egress"
     egress_sync_acl "$egress"
     # Tagged and given its network rules at creation, so a setup that stops
     # partway leaves one bxn knows, never one without its rules (a rerun
@@ -222,25 +239,70 @@ egress_start() {
   done
 }
 
-# Assigns an agent to an egress container and gives it a port there. Ports
-# come from a counter that only grows, so a deleted agent's port isn't handed
-# to another while its old proxies may still drain.
+# The next port to hand out in an egress container. Ports come from a counter
+# that only grows, so a deleted agent's port isn't handed to another while its
+# old proxies may still drain. The counter lives on the egress container, so
+# a rebuilt one starts over: the port is also above every port its agents
+# still hold.
+# Usage: egress_free_port <egress>
+egress_free_port() {
+  local egress="$1" port agents a p
+  port="$(incus config get "$egress" user.boxen.egress.next-port 2>/dev/null)" || return 1
+  [[ "$port" =~ ^[0-9]+$ ]] || port="$BOXEN_EGRESS_FIRST_PORT"
+  agents="$(incus list "user.boxen.egress.container=$egress" --format csv --columns n 2>/dev/null)" || return 1
+  for a in $agents; do
+    p="$(incus config get "$a" user.boxen.egress.port 2>/dev/null)" || return 1
+    if [[ "$p" =~ ^[0-9]+$ ]] && (( p >= port )); then port=$((p + 1)); fi
+  done
+  (( port <= BOXEN_EGRESS_LAST_PORT )) || return 1
+  echo "$port"
+}
+
+# Assigns an agent to an egress container and gives it a port there, and
+# makes sure the egress container has its proxy. Safe to repeat: the ctl's
+# add keeps an agent's port.
 # Usage: egress_register <agent> <egress>
 egress_register() {
   local agent="$1" egress="$2" port have
   have="$(incus config get "$agent" user.boxen.egress.container 2>/dev/null)"
   [[ -z "$have" || "$have" == "$egress" ]] ||
-    error "$agent already uses $have; moving it is a tightening (bxn egress mode)"
+    error "$agent already uses $have. Moving it isn't supported yet."
   port="$(incus config get "$agent" user.boxen.egress.port 2>/dev/null)"
   if ! [[ "$port" =~ ^[0-9]+$ ]]; then
-    port="$(incus config get "$egress" user.boxen.egress.next-port 2>/dev/null)"
-    [[ "$port" =~ ^[0-9]+$ ]] || port="$BOXEN_EGRESS_FIRST_PORT"
-    (( port <= BOXEN_EGRESS_LAST_PORT )) || error "$egress has handed out all its ports"
-    incus config set "$egress" "user.boxen.egress.next-port=$((port + 1))" >/dev/null
-    incus config set "$agent" "user.boxen.egress.container=$egress" "user.boxen.egress.port=$port" >/dev/null
+    port="$(egress_free_port "$egress")" || error "Could not find a free port in $egress"
+    incus config set "$egress" "user.boxen.egress.next-port=$((port + 1))" >/dev/null ||
+      error "Could not record $egress's next port"
+    # This agent is new to the egress container. A proxy there under its
+    # name is a deleted container's (removed while the egress container was
+    # stopped, or by incus delete), and would keep that one's port.
+    egress_ctl "$egress" remove "$agent" </dev/null >/dev/null ||
+      error "Could not clear an old proxy named $agent in $egress"
+    incus config set "$agent" "user.boxen.egress.container=$egress" "user.boxen.egress.port=$port" >/dev/null ||
+      error "Could not record $agent's proxy port"
   fi
   egress_ctl "$egress" add "$agent" "$port" </dev/null || error "Could not add $agent's proxy in $egress"
   egress_sync_acl "$egress"
+}
+
+# Before a converge: the egress container exists and runs, and has this
+# agent's proxy on the agent's port. A failed add, a rebuilt egress
+# container, or an old proxy of the same name is put right here.
+# Usage: egress_reattach <agent>
+egress_reattach() {
+  local agent="$1" egress port st
+  egress="$(incus config get "$agent" user.boxen.egress.container 2>/dev/null)"
+  [[ -n "$egress" ]] || error "$agent has no egress container"
+  port="$(incus config get "$agent" user.boxen.egress.port 2>/dev/null)"
+  [[ "$port" =~ ^[0-9]+$ ]] || error "$agent has no proxy port"
+  egress_ensure "$egress"
+  st="$(egress_ctl "$egress" status "$agent" </dev/null 2>/dev/null)" || st=""
+  [[ -n "$st" && "$(cut -f2 <<< "$st")" == "$port" ]] && return 0
+  if [[ -n "$st" ]]; then
+    warn "$egress's proxy for $agent listens on $(cut -f2 <<< "$st"), not $agent's port $port; replacing it"
+    egress_ctl "$egress" remove "$agent" </dev/null >/dev/null ||
+      error "Could not remove $agent's old proxy in $egress"
+  fi
+  egress_register "$agent" "$egress"
 }
 
 # The agent's proxy as it runs now: mode and hosts, from the egress container.
@@ -260,7 +322,7 @@ egress_apply() {
   mode="$(incus config get "$agent" user.boxen.egress 2>/dev/null)"
   mode="${mode:-enforce}"
   [[ "$(mode_rank "$mode")" -ge 0 ]] || error "$agent has an unknown egress mode: $mode"
-  hosts="$(egress_hosts "$agent")"
+  hosts="$(egress_hosts "$agent")" || error "Could not read $agent's hosts; its proxy stays as it is"
   id="$(printf '%s\n' "$hosts" | egress_policy_id "$mode")"
   cur="$(egress_ctl "$egress" status "$agent" </dev/null)" || error "Could not read $agent's proxy in $egress"
   if [[ "$(cut -f4 <<< "$cur")" == "$id" && "$(cut -f6 <<< "$cur")" == "yes" ]]; then
@@ -343,21 +405,32 @@ YAML
 
 egress_ip() { incus config device get "$1" eth0 ipv4.address 2>/dev/null; }
 
-# Locks the agent's card to its proxy: outbound default reject, so blocked
-# connections fail at once. Takes effect live for new connections; Incus lets
-# established ones through, which is why tightening from off restarts.
-egress_nic_restrict() {
-  local agent="$1" egress port acl gw
+# Writes the agent's own rules for its egress container's address and its
+# port as they are now: a rebuilt egress container has a new address.
+egress_agent_acl_sync() {
+  local agent="$1" egress port acl gw eip
   egress="$(incus config get "$agent" user.boxen.egress.container)"
   port="$(incus config get "$agent" user.boxen.egress.port)"
   acl="$(egress_agent_acl "$agent")"
   gw="$(incus network get "$BOXEN_NET" ipv4.address)"; gw="${gw%/*}"
+  eip="$(egress_ip "$egress")"
+  [[ "$eip" =~ ^[0-9]+(\.[0-9]+){3}$ && "$port" =~ ^[0-9]+$ ]] ||
+    error "Could not work out $agent's proxy address"
   if ! incus network acl show "$acl" &>/dev/null; then
     incus network acl create "$acl" >/dev/null 2>&1 || incus network acl show "$acl" &>/dev/null ||
       error "Could not create network ACL: $acl"
   fi
-  egress_agent_acl_yaml "$agent" "$(egress_ip "$egress")" "$port" "$gw" | incus network acl edit "$acl" ||
+  egress_agent_acl_yaml "$agent" "$eip" "$port" "$gw" | incus network acl edit "$acl" ||
     error "Could not set the rules in network ACL: $acl"
+}
+
+# Locks the agent's card to its proxy: outbound default reject, so blocked
+# connections fail at once. Takes effect live for new connections; Incus lets
+# established ones through, which is why tightening from off restarts.
+egress_nic_restrict() {
+  local agent="$1" acl
+  acl="$(egress_agent_acl "$agent")"
+  egress_agent_acl_sync "$agent"
   incus config device set "$agent" eth0 security.acls="$acl" \
     security.acls.default.egress.action=reject security.acls.default.ingress.action=drop >/dev/null ||
     error "Could not lock $agent's network card"
@@ -446,7 +519,15 @@ egress_clear_proxy_env() {
 # connection knows. A boot barrier keeps it from starting until the change
 # commits. Any step can be repeated; recovery replays them in order.
 
-egress_running() { [[ "$(incus list "^${1}$" --format csv --columns s 2>/dev/null)" == "RUNNING" ]]; }
+# An instance's status (RUNNING, STOPPED...), or a failure when it can't be read.
+egress_status() {
+  local st
+  st="$(incus list "^${1}$" --format csv --columns s 2>/dev/null)" || return 1
+  [[ -n "$st" ]] || return 1
+  echo "$st"
+}
+
+egress_running() { [[ "$(egress_status "$1" || true)" == "RUNNING" ]]; }
 
 # The transition, as "<mode>:<address>", or empty.
 egress_transition() {
@@ -459,11 +540,14 @@ egress_transition() {
 # Usage: egress_lockdown <agent>   (its desired mode is enforce or report)
 egress_lockdown() {
   local agent="$1" mode t ip saved orig egress
-  mode="$(incus config get "$agent" user.boxen.egress)"
+  mode="$(incus config get "$agent" user.boxen.egress)" || error "Could not read $agent's mode"
+  # Unset reads as enforce, as everywhere else.
+  mode="${mode:-enforce}"
   [[ "$mode" == enforce || "$mode" == report ]] || error "egress_lockdown: $agent's mode is $mode"
   egress="$(incus config get "$agent" user.boxen.egress.container)"
   t="$(egress_transition "$agent")"
-  if [[ -n "$t" ]]; then ip="${t#*:}"; else ip="$(net_next_address)"; fi
+  if [[ -n "$t" ]]; then ip="${t#*:}"; else ip="$(net_next_address)" || ip=""; fi
+  [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || error "Could not find a new address for $agent; nothing changed"
 
   # 1. The boot barrier, in one write. The original autostart is captured
   #    only when nothing is saved, so a retry keeps the first one.
@@ -476,12 +560,17 @@ egress_lockdown() {
     "user.boxen.egress.autostart-saved=$saved" boot.autostart=false >/dev/null ||
     error "Could not set $agent's boot barrier; nothing changed"
 
-  # 2. Stopped, and confirmed.
-  if egress_running "$agent"; then
+  # 2. Stopped, and confirmed: only an explicit STOPPED counts, since a
+  #    status that can't be read may be a running container.
+  local st
+  st="$(egress_status "$agent")" ||
+    error "Could not read $agent's status. It isn't locked yet; it won't start on its own. Retry: bxn egress refresh $agent"
+  if [[ "$st" != STOPPED ]]; then
     log "Stopping $agent to end its open connections..."
     incus stop "$agent" --timeout 30 >/dev/null 2>&1 || incus stop "$agent" --force >/dev/null 2>&1 || true
+    st="$(egress_status "$agent")" || st=""
   fi
-  egress_running "$agent" &&
+  [[ "$st" == STOPPED ]] ||
     error "Could not confirm $agent stopped. It isn't locked yet; it won't start on its own. Retry: bxn egress refresh $agent"
 
   # 3. The restrictive card rules. 4. No old proxy generation left.
@@ -520,15 +609,15 @@ egress_commit() {
 # and proxy already match the target is committed; anything else is replayed
 # from the start, which stops it first.
 egress_recover() {
-  local agent="$1" t mode ip egress st
+  local agent="$1" t mode ip egress st id
   t="$(egress_transition "$agent")"
   [[ -n "$t" ]] || return 0
   mode="${t%%:*}" ip="${t#*:}"
   egress="$(incus config get "$agent" user.boxen.egress.container)"
   if egress_running "$agent" && egress_nic_is_restricted "$agent" && [[ "$(egress_ip "$agent")" == "$ip" ]]; then
     st="$(egress_ctl "$egress" status "$agent" </dev/null 2>/dev/null)" || st=""
-    if [[ "$(cut -f5 <<< "$st")" == "$mode" && "$(cut -f6 <<< "$st")" == "yes" &&
-          "$(cut -f4 <<< "$st")" == "$(egress_hosts "$agent" | egress_policy_id "$mode")" ]]; then
+    id="$(egress_hosts_id "$agent" "$mode")" || error "Could not read $agent's hosts; it isn't committed"
+    if [[ "$(cut -f5 <<< "$st")" == "$mode" && "$(cut -f6 <<< "$st")" == "yes" && "$(cut -f4 <<< "$st")" == "$id" ]]; then
       log "$agent is locked and its proxy is verified; finishing"
       egress_commit "$agent"
       return 0
@@ -546,6 +635,7 @@ egress_converge() {
   mode="${mode:-enforce}"
   # An interrupted lockdown finishes first; then the container converges on
   # its mode as it is now, which may have changed since the lockdown began.
+  egress_reattach "$agent"
   local was_locked=0
   if [[ "$mode" != off && -n "$(egress_transition "$agent")" ]]; then
     egress_recover "$agent"
@@ -561,6 +651,7 @@ egress_converge() {
       ;;
     enforce | report)
       if egress_nic_is_restricted "$agent"; then
+        egress_agent_acl_sync "$agent"
         r="$(egress_apply "$agent" "$force")" || return 1
       else
         egress_lockdown "$agent"
@@ -613,8 +704,8 @@ egress_prepare_unstarted() {
   egress_register "$agent" "$egress"
   incus config set "$agent" "user.boxen.egress=$mode" >/dev/null
   egress_nic_restrict "$agent"
+  # egress_apply records what it applied.
   egress_apply "$agent" >/dev/null || error "Could not start $agent's proxy"
-  incus config set "$agent" "user.boxen.egress.active=$mode:$(egress_hosts "$agent" | egress_policy_id "$mode")" >/dev/null
 }
 
 # What the user and the agent see in a locked container: a login banner and a
