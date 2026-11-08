@@ -1,0 +1,21 @@
+bxn.egress
+  s_72cef02a544353::t_96069443e45cad 564-572,574,576-579,609,634
+tests/egress_cli_test.sh
+  s_72cef02a544353::t_fbd7834d8023aa 354-366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e6e6044e7811a3e3a9b4d48f42865fed5c39fdb6",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
