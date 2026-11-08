@@ -9,6 +9,7 @@
 #   <agent>/port            from add
 #   <agent>/gens/<n>/{mode,policy,hosts}
 #   <agent>/current         generation number, or none
+#   <agent>/listening       optional: what status says instead of yes
 # Knob: FAKE_EGRESS_CTL_FAIL, a regex; a call whose arguments match exits 1.
 set -uo pipefail
 d="$1"; shift
@@ -44,7 +45,8 @@ case "$1" in
     fi
     c="$(cur "$2")"
     if [[ "$c" == none ]]; then printf '%s\t%s\tnone\t-\t-\tno\t\n' "$2" "$(cat "$d/$2/port")"
-    else printf '%s\t%s\t%s\t%s\t%s\tyes\t%s\n' "$2" "$(cat "$d/$2/port")" "$c" "$(cat "$d/$2/gens/$c/policy")" "$(cat "$d/$2/gens/$c/mode")" "$c"; fi
+    else printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$2" "$(cat "$d/$2/port")" "$c" "$(cat "$d/$2/gens/$c/policy")" "$(cat "$d/$2/gens/$c/mode")" \
+      "$(cat "$d/$2/listening" 2>/dev/null || echo yes)" "$c"; fi
     ;;
   hosts) c="$(cur "$2")"; [[ "$c" == none ]] || cat "$d/$2/gens/$c/hosts" ;;
   # Decision records a test wrote to <agent>/log, as the real ctl prints them.
