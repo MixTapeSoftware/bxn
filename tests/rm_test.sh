@@ -107,6 +107,19 @@ assert_eq "a stash is work too" "1 yes" "$RC $(exists stashed)"
 assert_contains "and is counted" ": 1 stash" "$OUT"
 assert_not_contains "the stashed file isn't counted as changed" "changed" "$OUT"
 
+make_box detached
+git -C "$(ws_of detached)" checkout -q --detach
+commit detached
+run rm detached
+assert_eq "commits on a detached HEAD count" "1 yes" "$RC $(exists detached)"
+assert_contains "and are counted" "1 commit on no remote" "$OUT"
+incus launch img empty >/dev/null
+incus config set empty user.managed-by=boxen
+mkdir -p "$(ws_of empty)"
+git -C "$(ws_of empty)" init -q
+run rm empty
+assert_eq "a repository with no commits yet is checked, and clean" "0 no" "$RC $(exists empty)"
+
 echo "on a terminal"
 if command -v script >/dev/null 2>&1; then
   run_tty n rm ahead
@@ -146,6 +159,20 @@ echo hi > "$(ws_of broken)/new.txt"
 FAKE_INCUS_FAIL_EXEC='^su ' run rm broken
 assert_eq "off a terminal it deletes" "0 no" "$RC $(exists broken)"
 assert_contains "with a note" "bxn couldn't check broken" "$OUT"
+
+echo "a workspace that can't be entered"
+make_box locked
+echo hi > "$(ws_of locked)/new.txt"
+rm -rf "$(ws_of locked)"
+printf 'not a directory\n' > "$(ws_of locked)"
+run rm locked
+assert_eq "off a terminal it deletes, as a failed check does" "0 no" "$RC $(exists locked)"
+assert_contains "but says it couldn't check" "bxn couldn't check locked" "$OUT"
+make_box gone
+rm -rf "$(ws_of gone)"
+run rm gone
+assert_eq "a missing workspace holds nothing" "0 no" "$RC $(exists gone)"
+assert_not_contains "and needs no note" "[!]" "$OUT"
 
 echo "not a git repository"
 incus launch img plain >/dev/null

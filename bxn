@@ -1295,14 +1295,21 @@ SNIPPET
 
 # Run in the container as its user by rm_unpushed_counts, with the workspace
 # as $1. Kept out of $(...) so bash 3.2 never scans it for parens. Optional
-# locks off, so it never contends with git the agent is running.
+# locks off, so it never contends with git the agent is running. A missing
+# workspace holds nothing; one that is there but can't be entered is a check
+# that failed. Commits count from every branch and from HEAD, which may be
+# detached (mid-rebase, or checked out by hash); a repository with no
+# commits yet has no HEAD to count from.
 RM_CHECK_SCRIPT='
 export GIT_OPTIONAL_LOCKS=0
-cd "$1" 2>/dev/null || { echo "bxn-rm-check none"; exit 0; }
+[ -e "$1" ] || { echo "bxn-rm-check none"; exit 0; }
+cd "$1" || exit 1
 [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || { echo "bxn-rm-check none"; exit 0; }
 files=$(git status --porcelain) || exit 1
 stashes=$(git stash list) || exit 1
-commits=$(git rev-list --count --branches --not --remotes) || exit 1
+head=
+git rev-parse -q --verify HEAD >/dev/null && head=HEAD
+commits=$(git rev-list --count --branches $head --not --remotes) || exit 1
 echo "bxn-rm-check $(printf "%s" "$files" | grep -c .) $commits $(printf "%s" "$stashes" | grep -c .)"
 '
 

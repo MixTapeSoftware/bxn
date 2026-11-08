@@ -420,7 +420,7 @@ git diff main..origin/<branch>
 
 A fetch brings commits, never the container's git config or hooks. The commits can still change anything in the tree, including `package.json` scripts, `Makefile`s, `.envrc`, `.vscode/tasks.json` and hook managers like husky, so read the diff before you run it.
 
-The copy lives only in the container. Deleting the container deletes any work you haven't pushed, so `bxn rm` looks first. In the workspace's git repository it counts changed or new files, commits on no remote (on any branch), and stashes. If it finds any, it asks before deleting, and when it isn't run from a terminal it refuses. It can't look inside a stopped container, or when the check fails: then it asks, and off a terminal it says so and deletes as before. `bxn rm --force` skips the check.
+The copy lives only in the container. Deleting the container deletes any work you haven't pushed, so `bxn rm` looks first. In the workspace's git repository it counts changed or new files, commits on no remote (on any branch, or a detached HEAD), and stashes. If it finds any, it asks before deleting, and when it isn't run from a terminal it refuses. It can't look inside a stopped container, or when the check fails (including a workspace it can't enter): then it asks, and off a terminal it says so and deletes as before. `bxn rm --force` skips the check.
 
 A commit counts as pushed once a remote branch the container knows of has it. A workspace copied from the host keeps the host's remote branches, so a commit made on the host and never pushed counts as unpushed here too.
 
