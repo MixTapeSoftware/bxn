@@ -51,7 +51,7 @@ egress_read_hosts() {
   [[ -f "$file" ]] || return 0
   norm="$(awk '{ sub(/#.*/, ""); sub(/^[ \t\r]+/, ""); sub(/[ \t\r]+$/, ""); if ($0 == "") next
                  $0 = tolower($0); sub(/\.$/, ""); if (length($0) > 253) $0 = "!" $0
-                 print NR "\t" $0 }' "$file")"
+                 print NR "\t" $0 }' "$file")" || error "Could not read $file"
   [[ -n "$norm" ]] || return 0
   bad="$(grep -vE "^[0-9]+	$EGRESS_HOST_RE\$" <<< "$norm" | head -1 || true)"
   [[ -z "$bad" ]] || error "$file line ${bad%%	*}: not a hostname bxn accepts: ${bad#*	}"

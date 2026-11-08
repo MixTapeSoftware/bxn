@@ -76,10 +76,13 @@ need_container() {
   incus info "$c" &>/dev/null || error "Container not found: $c"
 }
 
-# Containers with an allowlist proxy.
+# Containers with an allowlist proxy. Fails when they can't be listed, so a
+# bulk change never reads a failed list as no containers.
 allowlisted() {
-  local c
-  for c in $(incus list user.managed-by=boxen --format csv --columns n 2>/dev/null); do
+  local c names
+  names="$(incus list user.managed-by=boxen --format csv --columns n 2>/dev/null)" ||
+    error "Could not list the containers"
+  for c in $names; do
     [[ -n "$(incus config get "$c" user.boxen.egress.container 2>/dev/null)" ]] && echo "$c"
   done
   return 0
@@ -273,7 +276,8 @@ all_hosts() {
   mv "$EGRESS_USER_HOSTS.new" "$EGRESS_USER_HOSTS"
   # Listed again under the lock, after the write: any container locked since
   # the question was asked has the old list, and converges here too.
-  cs="$(allowlisted)"
+  cs="$(allowlisted)" ||
+    { boxen_unlock; error "Your additions changed, but no container got them. Retry: bxn egress refresh --all"; }
   for c in $cs; do converge_one "$c" || failed="$failed $c"; done
   boxen_unlock
   [[ -z "$failed" ]] || error "Changes did not finish for:$failed. Retry: bxn egress refresh --all"

@@ -107,6 +107,46 @@ assert_eq "docs.rs is still allowed" yes "$(allows box docs.rs)"
 run ls
 assert_not_contains "ls has nothing to say" "can't read" "$OUT"
 
+echo "a host list that can't be read"
+printf 'extra.example\n' > "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+run refresh box
+assert_eq "box allows your addition" yes "$(allows box extra.example)"
+good_gen="$(gen_of box)"
+chmod 000 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+run allow --all more.example --yes
+assert_eq "allow --all fails" "1" "$RC"
+assert_contains "it names the file" "Could not read $BOXEN_CONFIG_DIR/egress-baseline.txt" "$OUT"
+chmod 600 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+assert_eq "your additions are kept" "extra.example" "$(cat "$BOXEN_CONFIG_DIR/egress-baseline.txt")"
+chmod 000 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+run refresh box
+assert_eq "refresh fails" "1" "$RC"
+chmod 600 "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+assert_eq "and box's proxy keeps them" "$good_gen" "$(gen_of box)"
+rm -f "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+run refresh box
+
+echo "a container list that can't be read under the lock"
+# The first list, for the question, works; the second, under the lock, fails.
+mv "$SANDBOX/bin/incus" "$SANDBOX/bin/incus.real"
+cat > "$SANDBOX/bin/incus" <<'W'
+#!/usr/bin/env bash
+if [[ "$*" == "list user.managed-by=boxen --format csv --columns n" ]]; then
+  n="$(cat "$FAKE_INCUS_STATE/nlist" 2>/dev/null || echo 0)"; echo $((n + 1)) > "$FAKE_INCUS_STATE/nlist"
+  [[ "$n" -ge 1 ]] && exit 1
+fi
+exec "$(dirname "$0")/incus.real" "$@"
+W
+chmod +x "$SANDBOX/bin/incus"
+run allow --all listfail.example --yes
+mv "$SANDBOX/bin/incus.real" "$SANDBOX/bin/incus"
+assert_eq "allow --all fails" "1" "$RC"
+assert_contains "and says to refresh" "no container got them. Retry: bxn egress refresh --all" "$OUT"
+run refresh --all
+assert_eq "the retry applies it" yes "$(allows box listfail.example)"
+rm -f "$BOXEN_CONFIG_DIR/egress-baseline.txt"
+run refresh --all
+
 echo "a looser mode that doesn't go through isn't kept"
 make_box c 10.201.0.60
 run mode c enforce
