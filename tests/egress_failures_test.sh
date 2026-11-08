@@ -131,6 +131,18 @@ fi
 rm -f "$BOXEN_CONFIG_DIR/egress-baseline.txt"
 run refresh box
 
+echo "an upload cap that can't be read"
+run upload-cap box on
+assert_contains "box's proxy cuts uploads" "upload-cap on" "$(gen_file box upload)"
+good_gen="$(gen_of box)"
+FAKE_INCUS_FAIL_CALL='^config get box user.boxen.egress.upload-cap$' run refresh box
+assert_eq "refresh fails when the cap can't be read" "1" "$RC"
+assert_eq "and keeps the policy" "$good_gen" "$(gen_of box)"
+assert_contains "so the cap stays on" "upload-cap on" "$(gen_file box upload)"
+FAKE_INCUS_FAIL_CALL='^config get box user.boxen.egress.upload-cap$' run ls
+assert_contains "ls says the lists can't be read" "can't read its host lists" "$(grep '^box ' <<< "$OUT")"
+run upload-cap box off
+
 echo "a container list that can't be read under the lock"
 # The first list, for the question, works; the second, under the lock, fails.
 mv "$SANDBOX/bin/incus" "$SANDBOX/bin/incus.real"
