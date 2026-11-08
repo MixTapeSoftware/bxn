@@ -1,0 +1,23 @@
+tests/create_lifecycle_test.sh
+  s_72cef02a544353::t_00f931612eedca 29-30
+boxen.create
+  s_72cef02a544353::t_cda8d4177bb1cc 189-193
+tests/template_scrub_test.sh
+  s_72cef02a544353::t_e51108052435a0 314-316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7ae5154ed79dcccd1e0f74dbc4506b2759ea14cc",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+NETWORKING.md
+  s_72cef02a544353::t_533d56bcf8957e 25,30,63-70,76,78,86
+README.md
+  s_72cef02a544353::t_c95d5c4fca71ae 784
+bxn.egress
+  s_72cef02a544353::t_ca8c6272fc3d63 502-505
+egress/boxen-egress-ctl
+  s_72cef02a544353::t_5a2295e8b36093 530-533,570-582
+egress/boxen-smokescreen/main.go
+  s_72cef02a544353::t_e9e0c163ce0e91 43,46-51,89,124-125,132,144-145,147,150-151,167-179,185-203,205,221-235,237,240
+egress/boxen-smokescreen/main_test.go
+  s_72cef02a544353::t_f7e754a150515d 9,20,160-246,340,371-395,401-436
+egress/boxen-smokescreen/uploads.go
+  s_72cef02a544353::t_8c651f3ef5af1e 3-8,10-24,26,48,51,56-61,67,72-75,78,87,105-127,155-157,160-161,164-190,194-195,197,201,206,208-211,213-219,228,232,236-240,248-249,256,275,277,279
+egress/boxen-smokescreen/uploads_test.go
+  s_72cef02a544353::t_9162d61609330c 3-5,13,97-107,109-110,114,117-119,141,168,179,186,191-324,441
+egress/upload-limits.txt
+  s_72cef02a544353::t_5ababc2a01a732 16-19
+tests/egress_cli_test.sh
+  s_72cef02a544353::t_f5cbae7984dce0 382-390
+tests/egress_units_test.sh
+  s_72cef02a544353::t_d606f3dd01cb31 61-65,80-85
+  s_05f0148903779a::t_824a59462f215b 87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d22cec706b8ba8ca6378387a7bd20601914378d7",
+  "prompts": {},
+  "sessions": {
+    "s_05f0148903779a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d4853203-8bdb-457a-9c09-d34937aaa670",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    },
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+README.md
+  s_ca93edf61f0d5e::t_ad2d74ef7a9dec 103-104,129,423-425
+bxn
+  s_ca93edf61f0d5e::t_cb9237e6c3d335 125
+  s_ca93edf61f0d5e::t_0794414a6f30b9 79-81
+  s_ca93edf61f0d5e::t_47d02dbc726bb2 1296-1362
+  s_ca93edf61f0d5e::t_fa76fa547617dc 1419-1424,1427,1429
+tests/rm_test.sh
+  s_ca93edf61f0d5e::t_65be5f4d05fee2 1-170
+tests/lib/fake_incus
+  s_ca93edf61f0d5e::t_56be3f4a4190ab 427-433
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8f72d644d57db01a95e8d4cd41c70e264d20878b",
+  "prompts": {},
+  "sessions": {
+    "s_ca93edf61f0d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09a75c5-e2d1-4edd-baab-34535d2ad01f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}

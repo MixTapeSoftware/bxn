@@ -1,0 +1,26 @@
+bxn.plugins
+  s_72cef02a544353::t_ad42e608711339 95
+bxn.doctor
+  s_72cef02a544353::t_ad42e608711339 403-404
+tests/doctor_test.sh
+  s_72cef02a544353::t_6161fc596f4a75 217
+  s_72cef02a544353::t_ad42e608711339 28-29,218
+tests/plugins_cmd_test.sh
+  s_72cef02a544353::t_ad42e608711339 31-32,101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "147e69a0ac604fbc8c40403be7ce2fadbeb0e4f4",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}

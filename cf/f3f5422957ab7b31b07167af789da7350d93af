@@ -1,0 +1,46 @@
+bxn.doctor
+  s_72cef02a544353::t_35b87f45efbb1a 354-355
+tests/doctor_test.sh
+  s_72cef02a544353::t_35b87f45efbb1a 194-200
+tests/egress_cli_test.sh
+  s_72cef02a544353::t_35b87f45efbb1a 252-257
+boxen.plugins
+  s_72cef02a544353::t_35b87f45efbb1a 15-16,92-123,127,136-137,139-147,150-155,159-163,165-166,168,192-196
+tests/lib/fake_egress_ctl
+  s_72cef02a544353::t_35b87f45efbb1a 12,48-49
+tests/plugins_source_test.sh
+  s_72cef02a544353::t_35b87f45efbb1a 158-168,171-217
+  s_72cef02a544353::t_3e3ded9f6375ee 218
+tests/lib/fake_systemd
+  s_72cef02a544353::t_35b87f45efbb1a 1-139
+egress/boxen-egress-ctl
+  s_72cef02a544353::t_35b87f45efbb1a 22-24,56-57,65-105,166-168,248,306,309-310,313,322,327,337,364,368-369,375-378,383,386,390,405-407,416,423-426,445,453,473,493,496-497,499-501,520-521,523,538
+chadmux.host
+  s_72cef02a544353::t_35b87f45efbb1a 108-112
+AGENTS.md
+  s_72cef02a544353::t_35b87f45efbb1a 21-31
+tests/egress_ctl_state_test.sh
+  s_72cef02a544353::t_35b87f45efbb1a 1-244
+tests/chadmux_host_test.sh
+  s_72cef02a544353::t_35b87f45efbb1a 148-158
+README.md
+  s_72cef02a544353::t_35b87f45efbb1a 325
+bxn.egress
+  s_72cef02a544353::t_2143e68c27c7af 311-312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cff3f5422957ab7b31b07167af789da7350d93af",
+  "prompts": {},
+  "sessions": {
+    "s_72cef02a544353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74099837-e11e-492a-9bea-7d4d99e6718d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
