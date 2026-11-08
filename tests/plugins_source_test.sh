@@ -155,7 +155,35 @@ fresh
 init nbox --plugins "file://$SANDBOX/nowhere"
 assert_eq "a repository never fetched refuses" "1" "$RC"
 assert_contains "and says why" "Could not fetch the plugins from file://$SANDBOX/nowhere" "$(cat "$SANDBOX/out")"
+# The clone holds v1 (commit1). A pin to anything else must not be served
+# from it: a pinned commit is what the user decided to trust.
+fresh
+init pbox --plugins "$REPO_URL#$commit2"
+assert_eq "a pin the copy isn't of refuses" "1" "$RC"
+assert_contains "and says the copy is of another ref" "the copy on this host is of v1, so it isn't used" "$(cat "$SANDBOX/out")"
+assert_eq "and installs nothing" "" "$(ran)"
+fresh
+init vbox --plugins "$REPO_URL#v1"
+assert_eq "the same pin builds from the copy" "0" "$RC"
+assert_eq "at its commit" "$commit1" "$(cfg vbox user.boxen.plugins.commit)"
 mv "$SANDBOX/src.away" "$SANDBOX/src"
+
+echo "a set-up cut short"
+# Left by a first fetch that failed: a .git with no commit, and here no
+# remote either, as when the set-up was interrupted before it was added.
+HALF="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; error(){ exit 1; }; source ./boxen.plugins; _plugins_source_clone_dir "$1"' _ "$REPO_URL.half")"
+mkdir -p "$HALF" && git -C "$HALF" init -q
+peek="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; error(){ exit 1; }; source ./boxen.plugins; plugins_source_peek "$1"; echo "commit=[$PLUGINS_SOURCE_COMMIT] dir=[$SOURCE_PLUGINS_DIR]"' _ "$REPO_URL.half")"
+assert_eq "peek has no commit for it, not the word HEAD" "commit=[] dir=[]" "$peek"
+rm -rf "$HALF"
+HALF="$(cd "$SANDBOX/repo" && bash -c 'SCRIPT_DIR=.; log(){ :; }; warn(){ :; }; error(){ exit 1; }; source ./boxen.plugins; _plugins_source_clone_dir "$1"' _ "$REPO_URL")"
+rm -rf "$HALF" && mkdir -p "$HALF" && git -C "$HALF" init -q
+fresh
+init hbox --plugins "$REPO_URL"
+assert_eq "a clone without its remote is finished, not refused" "0" "$RC"
+[[ "$RC" == 0 ]] || tail -20 "$SANDBOX/out"
+assert_eq "at the repository's head" "$commit2" "$(cfg hbox user.boxen.plugins.commit)"
+assert_eq "no lock is left behind" "" "$(ls -A "$CACHE" | grep lock || true)"
 
 echo "two URLs that read the same as a name"
 make_repo() {
