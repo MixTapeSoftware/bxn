@@ -249,6 +249,12 @@ echo "ls and log"
 run ls
 assert_contains "ls lists box" "box" "$OUT"
 assert_contains "with its proxy" "boxen-egress:10000" "$OUT"
+assert_not_contains "a settled proxy has no note" "older proxies still run" "$OUT"
+echo stopping > "$FAKE_INCUS_STATE/ctl/$E/box/listening"
+run ls
+assert_contains "ls says a narrowing left older proxies running" "a narrowing didn't finish, older proxies still run: bxn egress refresh box" "$OUT"
+assert_not_contains "and doesn't call that not listening" "no proxy listening" "$OUT"
+rm "$FAKE_INCUS_STATE/ctl/$E/box/listening"
 run ls box
 assert_contains "ls box shows where hosts come from" "api.anthropic.com" "$OUT"
 assert_contains "the baseline is a source" "baseline" "$OUT"

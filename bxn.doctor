@@ -350,6 +350,8 @@ check_egress() {
     if [[ -z "$found" ]]; then
       bad "$eg has no proxy for $name, so $name has no internet" \
         "incus exec $eg -- $BOXEN_EGRESS_CTL add $name $port; then bxn egress refresh $name"
+    elif [[ "$(cut -f6 <<< "$found")" == stopping ]]; then
+      bad "$name's proxy in $eg didn't finish narrowing: older proxies still run with the earlier allowlist" "bxn egress refresh $name"
     elif [[ "$(inst_field "$row" 2)" == RUNNING && "$(cut -f6 <<< "$found")" != yes ]]; then
       bad "$name's proxy in $eg isn't listening, so $name has no internet" "bxn egress refresh $name"
     else

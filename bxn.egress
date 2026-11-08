@@ -298,7 +298,11 @@ status_line() {
   if [[ "$mode" != off ]] && ! egress_nic_is_restricted "$c"; then notes+="card not locked; "; fi
   if egress_running "$egress"; then
     st="$(egress_ctl "$egress" status "$c" </dev/null 2>/dev/null)" || st=""
-    [[ "$(cut -f6 <<< "$st")" == "yes" ]] || notes+="no proxy listening; "
+    case "$(cut -f6 <<< "$st")" in
+      yes) ;;
+      stopping) notes+="a narrowing didn't finish, older proxies still run: bxn egress refresh $c; " ;;
+      *) notes+="no proxy listening; " ;;
+    esac
     local draining
     draining="$(cut -f7 <<< "$st" | wc -w | tr -d ' ')"
     (( draining > 1 )) && notes+="$((draining - 1)) older proxies draining; "
