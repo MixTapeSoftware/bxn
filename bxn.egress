@@ -88,6 +88,35 @@ allowlisted() {
   return 0
 }
 
+# Whether a container was built for an allowlist: it has a proxy, or its
+# build recorded the mode before it got one.
+wants_allowlist() {
+  local m
+  [[ -z "$(incus config get "$1" user.boxen.egress.container 2>/dev/null)" ]] || return 0
+  m="$(incus config get "$1" user.boxen.egress 2>/dev/null)" || m=""
+  [[ "$m" == enforce || "$m" == report ]]
+}
+
+# Builds for an allowlist abandoned before their lock: no proxy yet, so
+# allowlisted leaves them out, though they may be running open.
+abandoned_before_lock() {
+  local c list
+  list="$(incus list user.managed-by=boxen --format csv --columns n 2>/dev/null)" || error "Could not list the containers"
+  for c in $list; do
+    [[ -z "$(incus config get "$c" user.boxen.egress.container 2>/dev/null)" ]] || continue
+    wants_allowlist "$c" && egress_build_abandoned "$c" && echo "$c"
+  done
+  return 0
+}
+
+# Where an abandoned build stopped, for messages: open (before its lock),
+# locked (after it) or finishing.
+abandoned_at() {
+  local p
+  p="$(incus config get "$1" user.boxen.egress.build 2>/dev/null)" || p=""
+  if [[ "$p" == open || "$p" == locked ]]; then echo "$p"; else echo finishing; fi
+}
+
 # Gives a container on the isolated bridge its proxy, with open policy rules
 # unchanged until a mode says otherwise.
 attach() {
@@ -290,7 +319,7 @@ all_hosts() {
 }
 
 cmd_ls() {
-  local c="${1:-}" egress mode active port h cs
+  local c="${1:-}" egress mode active port h cs abandoned
   if [[ "${2:-}" == "--tsv" ]]; then
     need_container "$c"
     if [[ "${3:-}" == "--applied" ]]; then
@@ -310,6 +339,10 @@ cmd_ls() {
   if [[ -n "$c" ]]; then
     need_container "$c"
     egress="$(incus config get "$c" user.boxen.egress.container 2>/dev/null)"
+    if [[ -z "$egress" ]] && wants_allowlist "$c" && egress_build_abandoned "$c"; then
+      echo "$c: its build was abandoned before its allowlist was locked, so it has none. Delete it: bxn rm $c"
+      return 0
+    fi
     [[ -n "$egress" ]] || { echo "$c: no allowlist (set one with: bxn egress mode $c enforce)"; return 0; }
     status_line "$c"
     echo ""
@@ -317,11 +350,15 @@ cmd_ls() {
     hosts_with_sources "$c" | awk -F'\t' '{ printf "%-50s  %s\n", $1, $2 }'
     return 0
   fi
-  # Listed first: a failed list in a for loop's words would print nothing
-  # and exit 0, as if no container had an allowlist.
+  # Read first: a list that failed must fail ls, not read as no containers.
   cs="$(allowlisted)" || exit 1
+  abandoned="$(abandoned_before_lock)" || exit 1
   printf '%-28s %-8s %-18s %-22s %s\n' CONTAINER MODE ACTIVE PROXY NOTES
   for c in $cs; do status_line "$c"; done
+  for c in $abandoned; do
+    printf '%-28s %-8s %-18s %-22s %s\n' "$c" "$(incus config get "$c" user.boxen.egress 2>/dev/null)" "never locked" - \
+      "build abandoned (open): it may be running without its allowlist; bxn egress refresh $c stops it; then bxn rm $c"
+  done
   ufw_note
 }
 
@@ -333,7 +370,7 @@ status_line() {
   active="$(incus config get "$c" user.boxen.egress.active 2>/dev/null)"
   port="$(incus config get "$c" user.boxen.egress.port 2>/dev/null)"
   [[ -n "$(egress_transition "$c")" ]] && notes+="change interrupted: bxn egress refresh $c; "
-  egress_build_abandoned "$c" && notes+="build abandoned ($(incus config get "$c" user.boxen.egress.build)): rebuild or delete it; "
+  egress_build_abandoned "$c" && notes+="build abandoned ($(abandoned_at "$c")): rebuild or delete it; "
   id="$(egress_hosts_id "$c" "$mode" 2>/dev/null)" ||
     { id=""; notes+="can't read its host lists (bxn egress ls $c says why); "; }
   if [[ "${active%%:*}" != "$mode" ]]; then
@@ -410,7 +447,7 @@ cmd_log() {
 }
 
 cmd_refresh() {
-  local target="${1:-}" cs c failed=""
+  local target="${1:-}" cs c failed="" abandoned
   egress_ensure_approved
   if ! cmp -s <(egress_read_hosts "$EGRESS_SHIPPED") <(egress_read_hosts "$EGRESS_APPROVED"); then
     echo "The shipped egress baseline differs from the one you approved:"
@@ -426,20 +463,26 @@ cmd_refresh() {
   fi
   case "$target" in
     "") return 0 ;;
-    --all) cs="$(allowlisted)" ;;
+    --all)
+      cs="$(allowlisted)" || exit 1
+      abandoned="$(abandoned_before_lock)" || exit 1
+      cs="$cs $abandoned"
+      ;;
     *) need_container "$target"; cs="$target" ;;
   esac
   boxen_lock
   for c in $cs; do
-    [[ -n "$(incus config get "$c" user.boxen.egress.container 2>/dev/null)" ]] || { warn "$c has no allowlist"; continue; }
-    if egress_build_abandoned "$c"; then
+    # Before the proxy check: a build abandoned before its lock has none.
+    if wants_allowlist "$c" && egress_build_abandoned "$c"; then
       if egress_running "$c" && ! incus stop "$c" --force >/dev/null 2>&1; then
-        warn "$c's build was abandoned ($(incus config get "$c" user.boxen.egress.build)), and it couldn't be stopped. Stop it: incus stop --force $c"
+        warn "$c's build was abandoned ($(abandoned_at "$c")), and it couldn't be stopped. Stop it: incus stop --force $c"
+        failed="$failed $c"
         continue
       fi
-      warn "$c's build was abandoned ($(incus config get "$c" user.boxen.egress.build)); it's stopped. Rebuild it, or delete it: bxn rm $c"
+      warn "$c's build was abandoned ($(abandoned_at "$c")); it's stopped. Rebuild it, or delete it: bxn rm $c"
       continue
     fi
+    [[ -n "$(incus config get "$c" user.boxen.egress.container 2>/dev/null)" ]] || { warn "$c has no allowlist"; continue; }
     converge_one "$c" || failed="$failed $c"
   done
   boxen_unlock

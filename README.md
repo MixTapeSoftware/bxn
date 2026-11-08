@@ -687,7 +687,12 @@ bxn -u my-project
 bxn -ua
 ```
 
-`bxn -ua` starts stopped containers, updates them, then stops them again. Containers that were already running are left running. Only containers tagged with `user.managed-by=boxen` (set automatically during `bxn -c`) are updated. Non-Debian containers are skipped.
+`bxn -ua` starts stopped containers, updates them, then stops them again. Containers that were already running are left running. Only containers tagged with `user.managed-by=boxen` (set automatically during `bxn -c`) are updated. Non-Debian containers are skipped, and so is a container whose
+`bxn -c` is still running. A container whose build never finished (its `bxn -c`
+was killed, or failed and you kept the container) is not started: not by
+`bxn -ua`, `bxn <name>` or the status view. It may still have the build's
+sudo, and under an allowlist its network may not be locked yet. `bxn doctor`
+lists these containers; delete them with `bxn rm`.
 
 Logs are written to `~/.local/state/boxen/logs/` and cleaned up on success.
 
@@ -704,7 +709,8 @@ bxn cron remove          # Remove the cron
 
 #### Failure Notifications
 
-If an update fails, you'll see a notification the next time you open a terminal:
+If an update fails, or a run stops before it finishes (for example when cron
+can't find `incus`), you'll see a notification the next time you open a terminal:
 
 ```
 ⚠️  bxn update failed (2026-04-11 19:00): avex mix-claude

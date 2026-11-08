@@ -182,6 +182,7 @@ template_cleanup_on_exit() {
     warn "Could not start '$CONTAINER_NAME' again: incus start $CONTAINER_NAME"
   fi
   restore_tailscale_state || warn_tailscale_backup
+  mark_build_done
   if ! restore_saved_tokens; then
     # The names only: the values never reach the terminal.
     warn "The $(saved_token_names) line(s) of $CONTAINER_NAME's ~/.zshenv were taken out for the publish and could not be put back. Set each again: bxn -e $CONTAINER_NAME <NAME>"
@@ -196,11 +197,24 @@ template_cleanup_on_exit() {
   exit "$rc"
 }
 
+# The build is complete: bxn may start the container from now on (boxen.build).
+mark_build_done() {
+  incus config set "$CONTAINER_NAME" user.boxen.build=done >/dev/null 2>&1 ||
+    warn "Could not record that $CONTAINER_NAME's build finished, so bxn takes it for an abandoned build. Record it: incus config set $CONTAINER_NAME user.boxen.build=done"
+}
+
 # An EXIT trap, not ERR: error() calls exit directly, which ERR never sees.
 cleanup_on_exit() {
   local rc=$? reply="" egress=""
   trap - EXIT INT TERM HUP
   set +e
+  # A signal while incus init runs is handled once init returns, before the
+  # line that sets CREATED_INSTANCE: the run's own tag says the container is
+  # this run's all the same.
+  if [[ "${CREATED_INSTANCE:-0}" != "1" && -n "${BUILD_RUN:-}" && -n "${CONTAINER_NAME:-}" ]] &&
+     [[ "$(incus config get "$CONTAINER_NAME" user.boxen.build.run 2>/dev/null)" == "$BUILD_RUN" ]]; then
+    CREATED_INSTANCE=1
+  fi
   if [[ "${CREATED_INSTANCE:-0}" == "1" && -n "${CONTAINER_NAME:-}" ]] && incus info "$CONTAINER_NAME" >/dev/null 2>&1; then
     # Before the prompt: the container may be kept, or the prompt never answered.
     revoke_build_sudo || \
@@ -248,6 +262,8 @@ CONTAINER_NAME=""
 # Set once this run has created the instance: a run that loses a race for a
 # name must never offer to delete the container that won it.
 CREATED_INSTANCE=0
+# This run, as tagged on the instance at init (user.boxen.build.run).
+BUILD_RUN=""
 PROJECT=""
 EXACT_NAME=""
 HANDLE=""
@@ -1706,8 +1722,13 @@ fi
 # still one bxn knows: status, rm, update-all and short names find it.
 # boxen.shell starts sessions in user.boxen.workspace; commands find a
 # container from its project by the handle and project (boxen.names).
+# The build's own record goes on with them (boxen.build): until it's done,
+# bxn doesn't start the container, and one whose builder is gone is
+# reported as abandoned.
+BUILD_RUN="$$.$RANDOM$RANDOM.$(date +%s)"
 TAG_ARGS=(-c user.managed-by=boxen -c user.boxen=1 -c "user.boxen.agent=$AGENT_TOKEN"
-  -c "user.boxen.workspace=$CONTAINER_WORKSPACE")
+  -c "user.boxen.workspace=$CONTAINER_WORKSPACE"
+  -c user.boxen.build=running -c "user.boxen.builder=$$@$(boxen_boot_id)" -c "user.boxen.build.run=$BUILD_RUN")
 if [[ -n "$HANDLE" ]]; then
   TAG_ARGS+=(-c "user.boxen.handle=$HANDLE" -c "user.boxen.project=$PROJECT")
 fi
@@ -1761,7 +1782,7 @@ if [[ "$LOCKED_BUILD" == "1" ]]; then
   # and boot tell a healthy build from an abandoned one.
   incus config set "$CONTAINER_NAME" boot.autostart=false user.boxen.egress.autostart-saved=unset \
     "user.boxen.egress=$EGRESS_MODE" "user.boxen.egress.builder=$$@$(egress_boot_id)" \
-    "user.boxen.egress.build=$([[ "$FROM_BASE_IMAGE" == "1" ]] && echo locked || echo open)"
+    user.boxen.egress.build=open
   # read -a splits on spaces without pathname expansion, so a wildcard such
   # as *.tailscale.com can't match files in the current directory.
   read -r -a _plugin_hosts <<< "$(_selected_plugin_hosts | tr '\n' ' ')"
@@ -1773,6 +1794,8 @@ if [[ "$LOCKED_BUILD" == "1" ]]; then
     boxen_lock
     egress_prepare_unstarted "$CONTAINER_NAME" "$EGRESS_CONTAINER" "$EGRESS_MODE"
     boxen_unlock
+    # Only now is it locked: its card and proxy are in place.
+    incus config set "$CONTAINER_NAME" user.boxen.egress.build=locked
     NET_VIA_PROXY=1
   fi
   incus start "$CONTAINER_NAME"
@@ -2053,6 +2076,7 @@ incus exec "$CONTAINER_NAME" -- su - "$HOST_USER" -c '
 if [[ "$SAVE_TEMPLATE" == "1" ]]; then
   trap template_cleanup_on_exit EXIT
 else
+  mark_build_done
   trap - EXIT INT TERM HUP
 fi
 
@@ -2126,5 +2150,6 @@ print_plugin_logins
 # ---------------------------------------------------------------------------
 if [[ "$SAVE_TEMPLATE" == "1" ]]; then
   save_template
+  mark_build_done
   trap - EXIT INT TERM HUP
 fi

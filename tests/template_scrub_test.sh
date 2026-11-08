@@ -204,7 +204,8 @@ echo "publish fails during a template build"
   echo 'wait_for_container() { :; }'
   echo 'wait_for_network() { :; }'
   for fn in start_and_wait stash_tailscale_state restore_tailscale_state warn_tailscale_backup \
-            template_cleanup_on_exit cleanup_on_exit saved_token_names restore_saved_tokens save_template; do
+            template_cleanup_on_exit cleanup_on_exit saved_token_names restore_saved_tokens save_template \
+            mark_build_done; do
     extract_fn "$fn"
   done
   echo 'CONTAINER_NAME=box; CREATED_INSTANCE=1; HOST_USER=dev; CONTAINER_WORKSPACE=/workspace'
