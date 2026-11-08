@@ -101,6 +101,13 @@ assert_not_contains "--no-tui: nothing to explain" "No terminal for the pickers"
 # ===========================================================================
 echo "Ctrl-C in a picker"
 # ===========================================================================
+# yes when the output hid the cursor, then showed it again after the last hide.
+cursor_back() {
+  local hid shown
+  [[ "$1" == *$'\033[?25l'* && "$1" == *$'\033[?25h'* ]] || { echo no; return; }
+  hid="${1%$'\033[?25l'*}"; shown="${1%$'\033[?25h'*}"
+  if [[ ${#shown} -gt ${#hid} ]]; then echo yes; else echo no; fi
+}
 if command -v script >/dev/null 2>&1 && script -qec true /dev/null >/dev/null 2>&1; then
   # In a pseudo-terminal: the agent picker hides the cursor, then Ctrl-C.
   # The terminal's state is read right after, in the same terminal.
@@ -111,8 +118,7 @@ if command -v script >/dev/null 2>&1 && script -qec true /dev/null >/dev/null 2>
   out="$(cat "$SANDBOX/tui.out")"
   assert_contains "the picker was up" "Pick the coding agent" "$(plain <<< "$out")"
   assert_contains "Ctrl-C ends the run" "rc=130" "$(plain <<< "$out")"
-  hid="${out%$'\033[?25l'*}"; shown="${out%$'\033[?25h'*}"
-  if [[ "$out" == *$'\033[?25l'* && ${#shown} -gt ${#hid} ]]; then back=yes; else back=no; fi
+  back="$(cursor_back "$out")"
   assert_eq "the cursor is shown again after it" "yes" "$back"
   assert_contains "the terminal's settings were read after" "speed" "$(plain <<< "$out")"
   assert_not_contains "…and typing echoes again" " -echo " " $(plain <<< "$out" | tr '\n' ' ') "
@@ -123,8 +129,7 @@ if command -v script >/dev/null 2>&1 && script -qec true /dev/null >/dev/null 2>
     > "$SANDBOX/tui.out" 2>&1 || true
   out="$(cat "$SANDBOX/tui.out")"
   assert_contains "the plugin picker was up" "Select plugins to install" "$(plain <<< "$out")"
-  hid="${out%$'\033[?25l'*}"; shown="${out%$'\033[?25h'*}"
-  if [[ ${#shown} -gt ${#hid} ]]; then back=yes; else back=no; fi
+  back="$(cursor_back "$out")"
   assert_eq "Ctrl-C in the plugin picker: the cursor is shown again" "yes" "$back"
 else
   echo "  skip: needs util-linux script(1)"
@@ -152,6 +157,13 @@ rm -f "$SANDBOX/colima.log"
 PATH="$SANDBOX/mac:$PATH" create web --dry-run --no-tui </dev/null
 assert_eq "a stopped profile: not started" "colima list" "$(sort -u "$SANDBOX/colima.log")"
 assert_contains "…saying the real run would" "The real run would first start the Colima profile 'boxen'" "$OUT"
+
+# Another profile whose name starts the same is running; boxen isn't.
+printf '#!/bin/sh\necho "colima $*" >> "%s/colima.log"\n[ "$1" = list ] && printf "PROFILE STATUS\\nboxen2 Running\\nboxen Stopped\\n"\nexit 0\n' "$SANDBOX" > "$SANDBOX/mac/colima"
+fresh
+rm -f "$SANDBOX/colima.log"
+PATH="$SANDBOX/mac:$PATH" create web --dry-run --no-tui </dev/null
+assert_contains "boxen2 running, boxen stopped: boxen is taken as stopped" "The real run would first start the Colima profile 'boxen'" "$OUT"
 
 # ===========================================================================
 echo "which images are templates"
