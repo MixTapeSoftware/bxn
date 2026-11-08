@@ -385,7 +385,8 @@ func TestFromEnv(t *testing.T) {
 		t.Fatal("an unknown cap value was accepted")
 	}
 	t.Setenv("BOXEN_UPLOAD_CAP", "")
-	for _, bad := range []string{"default\n", "default 1G\n", "a b 1\n", "x -1\n"} {
+	// A size is digits or off: no sign, not even on 0 (FuzzReadUploadLimits).
+	for _, bad := range []string{"default\n", "default 1G\n", "a b 1\n", "x -1\n", "x +1\n", "x -0\n"} {
 		os.WriteFile(path, []byte(bad), 0o644)
 		if _, err := uploadWatchFromEnv(true); err == nil {
 			t.Fatalf("accepted %q", bad)
