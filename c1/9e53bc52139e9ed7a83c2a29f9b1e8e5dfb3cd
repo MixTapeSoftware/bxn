@@ -1,0 +1,24 @@
+SANDBOX.md
+  s_ca93edf61f0d5e::t_bed43749fd489b 1-6,8-28,30-85
+  s_ca93edf61f0d5e::t_0ee0a515d2ffbf 7,29
+NETWORKING.md
+  s_ca93edf61f0d5e::t_0ee0a515d2ffbf 3
+README.md
+  s_ca93edf61f0d5e::t_0ee0a515d2ffbf 28,384
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c19e53bc52139e9ed7a83c2a29f9b1e8e5dfb3cd",
+  "prompts": {},
+  "sessions": {
+    "s_ca93edf61f0d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09a75c5-e2d1-4edd-baab-34535d2ad01f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
