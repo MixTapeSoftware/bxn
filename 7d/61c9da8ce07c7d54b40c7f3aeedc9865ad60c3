@@ -4,6 +4,7 @@ bxn
   s_72cef02a544353::t_86506b36a9f9f3 709-711,729,731-733
 bxn.egress
   s_72cef02a544353::t_5cfcc0bd591818 385-388,442-459,462,464
+  s_05f0148903779a::t_18089f055e929f 368
 egress/boxen-egress-ctl
   s_72cef02a544353::t_c137f7307befc9 27-28,507-510,519,522-523,526-549
 tests/egress_cli_test.sh
@@ -19,6 +20,14 @@ tests/egress_tui_test.sh
   "base_commit_sha": "7d61c9da8ce07c7d54b40c7f3aeedc9865ad60c3",
   "prompts": {},
   "sessions": {
+    "s_05f0148903779a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d4853203-8bdb-457a-9c09-d34937aaa670",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    },
     "s_72cef02a544353": {
       "agent_id": {
         "tool": "claude",
