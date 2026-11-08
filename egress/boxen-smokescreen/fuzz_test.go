@@ -422,6 +422,8 @@ func FuzzReadUploadLimits(f *testing.F) {
 	} {
 		f.Add([]byte(s))
 	}
+	// The shipped file is a seed only in bxn's tree: in smokescreen's copy
+	// there's no ../upload-limits.txt, and the seeds above cover its grammar.
 	if b, err := os.ReadFile("../upload-limits.txt"); err == nil {
 		f.Add(b) // sizes with K/M/G and comments: refused
 	}

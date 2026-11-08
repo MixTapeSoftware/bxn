@@ -47,9 +47,10 @@ const maxRecord = 16384
 const maxHello = 65536
 
 // A client may split its ClientHello across several handshake records. They
-// are held back until it is whole, but never more than the largest one
-// crypto/tls reads takes in full records, which is far more than any client
-// sends (a few KB, post-quantum key shares included).
+// are held back until it is whole, but never more than the largest
+// ClientHello crypto/tls reads plus the headers of the records it fills,
+// which is far more than any client sends (a few KB, post-quantum key
+// shares included).
 const maxHeld = 4 + maxHello + 5*((4+maxHello+maxRecord-1)/maxRecord)
 
 // As upstream: the role is the client certificate's name. bxn uses none, so
