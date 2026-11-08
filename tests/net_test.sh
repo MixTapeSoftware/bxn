@@ -191,6 +191,7 @@ fresh; template
 init ctbox
 assert_eq "a container template launches without --container" "0" "$RC"
 assert_contains "as a container" "launching as a container" "$(cat "$SANDBOX/out")"
+assert_eq "with a container's profiles" "default boxen boxen-net" "$(inst ctbox profiles | tr '\n' ' ' | sed 's/ $//')"
 init ctvm --vm
 assert_eq "--vm on a container template is refused" "1" "$RC"
 assert_contains "saying why" "is a container image; drop --vm" "$(cat "$SANDBOX/out")"

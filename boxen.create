@@ -53,9 +53,8 @@ Options:
   --colima-cpus N           Colima VM CPUs (default: 4, macOS only)
   --colima-memory N         Colima VM memory in GB (default: 8, macOS only)
   --colima-disk N           Colima VM disk in GB (default: 100, macOS only)
-  --container               Provision a system container instead of a KVM virtual
-                            machine (the default)
   --vm                      Provision a KVM virtual machine (the default)
+  --container               Provision a system container instead of a VM
   --no-copy                 Start with an empty workspace instead of copying the host directory
   --memory SIZE             Memory limit, e.g. 8GiB (default: the boxen profile's
                             4GiB for a VM, 6GB for a container; a selected plugin

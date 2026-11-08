@@ -146,9 +146,8 @@ Options:
   --<plugin>                Pre-select a plugin (e.g. --1pass, --gh-token)
   --agent NAME              The coding agent: claude, codex, grok, or shell for none
   --name NAME               Use NAME exactly, instead of HANDLE-AGENT-PROJECT
-  --container               Provision a system container instead of a KVM virtual
-                            machine (the default)
   --vm                      Provision a KVM virtual machine (the default)
+  --container               Provision a system container instead of a VM
   --no-copy                 Start with an empty workspace instead of copying the host directory
   --insecure-network        Use the default bridge: no isolation from other instances or the host
   --egress MODE             Internet allowlist: enforce (default), report or off
