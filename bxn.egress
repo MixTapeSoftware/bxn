@@ -365,6 +365,10 @@ cmd_baseline() {
   [[ $# -eq 2 ]] || usage 1
   need_container "$c"
   [[ "$v" == on || "$v" == off ]] || usage 1
+  # As with allow and rm: attach would put a container without an allowlist
+  # on one, and start it.
+  [[ -n "$(incus config get "$c" user.boxen.egress.container 2>/dev/null)" ]] ||
+    error "$c has no allowlist. Turn it on first: bxn egress mode $c enforce"
   boxen_lock
   attach "$c" ""
   incus config set "$c" "user.boxen.egress.baseline=$v" >/dev/null

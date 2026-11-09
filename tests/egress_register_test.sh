@@ -79,6 +79,12 @@ assert_eq "no proxy settings are written" "" "$(cfg off1 environment.HTTPS_PROXY
 run rm off1 docs.rs
 assert_eq "rm fails" "1" "$RC"
 assert_contains "the same way" "off1 has no allowlist" "$OUT"
+run baseline off1 off
+assert_eq "baseline fails" "1" "$RC"
+assert_contains "…the same way" "off1 has no allowlist. Turn it on first: bxn egress mode off1 enforce" "$OUT"
+assert_eq "…leaving it unregistered" "" "$(cfg off1 user.boxen.egress.container)"
+assert_eq "…and stopped" "STOPPED" "$(status off1)"
+assert_eq "…with nothing recorded" "" "$(cfg off1 user.boxen.egress.baseline)"
 run allow off1 'not a host'
 assert_eq "a bad host fails" "1" "$RC"
 assert_contains "a bad host is refused first" "Not a hostname bxn accepts: not a host" "$OUT"
