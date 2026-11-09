@@ -1,0 +1,21 @@
+README.md
+  s_7d25aa5b984683::t_f5628a3cf7dffb 90-92
+bxn
+  s_7d25aa5b984683::t_f5628a3cf7dffb 63-66,70-71,99-100,116-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d513b5bbd62240fa07d4250bdb5c9beaa770a479",
+  "prompts": {},
+  "sessions": {
+    "s_7d25aa5b984683": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71aaa015-6a46-4cf4-9924-75716400660b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
