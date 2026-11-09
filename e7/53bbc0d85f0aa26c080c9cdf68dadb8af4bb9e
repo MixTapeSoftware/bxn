@@ -1,0 +1,24 @@
+plugins/50-codex.sh
+  s_ca93edf61f0d5e::t_087771866ea550 20-24,26-27,33,37-53
+  s_ca93edf61f0d5e::t_829355f34d932a 71-72
+tests/codex_plugin_test.sh
+  s_ca93edf61f0d5e::t_21a69fef052d6a 57,71,73-74,81,93-94,101,111,115,118-136,141
+SANDBOX.md
+  s_ca93edf61f0d5e::t_2a6368477c9c5a 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e753bbc0d85f0aa26c080c9cdf68dadb8af4bb9e",
+  "prompts": {},
+  "sessions": {
+    "s_ca93edf61f0d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09a75c5-e2d1-4edd-baab-34535d2ad01f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
