@@ -1,0 +1,87 @@
+NETWORKING.md
+  s_ca93edf61f0d5e::t_8c0de083d9ae90 1-93
+README.md
+  s_ca93edf61f0d5e::t_91880f7acaf036 27-28,36,55-57,91-93,107-108,133,154-155,164,177,389,428-430,519-522,525-528,534-535,544-546,549-552,555-558,561-562,775,786-790,801-803,806,815
+SANDBOX.md
+  s_ca93edf61f0d5e::t_058698bb90f510 1-87
+boxen.create
+  s_ca93edf61f0d5e::t_a7628fcaa7ab08 56-57,60,281-284,1398-1402,1523-1525,1527-1532,1544
+boxen.egress
+  s_ca93edf61f0d5e::t_ba52b5fb45d412 20-21,102-104,106-108,129-132,134-135,137-138,141-243,339-345,352,355-396,488,495-499,517,792,911-917
+boxen.macos.setup
+  s_ca93edf61f0d5e::t_efa935c6d34fa4 20-37,57-58,60,62,70,116-124,127,129,132-135,139-147
+bxn
+  s_ca93edf61f0d5e::t_ce1e346a4d3db4 63-66,70-71,82-84,101-102,118-120,132,452,599-602,604-626,628-629,631,633-634,637,639,643-645,648,650-651,677-682,725-876,889-892,910,912-914,931-932,937-938,947,951-955,957-958,960-981,983-1021,1023-1055,1057,1060-1061,1063-1066,1068-1085,1088-1098,1100-1102,1104-1125,1127-1146,1148-1152,1154-1159,1161-1162,1164-1167,1169-1177,1179,1181-1265,1267-1273,1362-1435,1492-1497,1500,1502
+bxn.doctor
+  s_ca93edf61f0d5e::t_912d55b5b430cf 331-332
+bxn.egress
+  s_ca93edf61f0d5e::t_3319bb922b993b 39-42,57-65,70-71,192-202,469,476-477,482,487-498,534,540,548-551,557-600,603,605,613-726,728,763-770,798-799
+egress/boxen-egress-ctl
+  s_ca93edf61f0d5e::t_fec91666306411 15-18,29-33,250,256-270,302-306,528-536,545-549,552-554,557-596,600-621,650
+egress/boxen-proxy-run
+  s_ca93edf61f0d5e::t_ff1f7221d40e4e 3-4,28-37
+egress/boxen-smokescreen/fuzz_test.go
+  s_ca93edf61f0d5e::t_b12cfb9bf61a8f 1-570
+egress/boxen-smokescreen/main.go
+  s_ca93edf61f0d5e::t_51a147d4794828 1-311
+egress/boxen-smokescreen/main_test.go
+  s_ca93edf61f0d5e::t_2b29d4bf61784d 1-506
+egress/boxen-smokescreen/uploads.go
+  s_ca93edf61f0d5e::t_bdcfdad5c3b42b 1-301
+egress/boxen-smokescreen/uploads_test.go
+  s_ca93edf61f0d5e::t_6aedac5bf0d042 1-497
+egress/build-smokescreen.sh
+  s_ca93edf61f0d5e::t_2eda58b3611d80 7-12,14-17,44-45,49-52,55
+egress/upload-limits.txt
+  s_ca93edf61f0d5e::t_a6c1445b6e06bb 1-69
+plugins/50-codex.sh
+  s_ca93edf61f0d5e::t_7e25b8f4dc6d26 7-74,88,94-97
+tests/codex_plugin_test.sh
+  s_ca93edf61f0d5e::t_49f04d51bd182a 1-145
+tests/create_pickers_test.sh
+  s_ca93edf61f0d5e::t_36e7c914a1b479 150-151,159-160
+tests/doctor_test.sh
+  s_ca93edf61f0d5e::t_ea0a4315d022f0 184-192
+tests/egress_cli_test.sh
+  s_ca93edf61f0d5e::t_074297985137f9 339-473,487-515
+tests/egress_failures_test.sh
+  s_ca93edf61f0d5e::t_c0e6fdd588d26b 155-166,236
+tests/egress_test.sh
+  s_ca93edf61f0d5e::t_5927cc8767214c 130-193,210-216,276-312
+tests/egress_tui_test.sh
+  s_ca93edf61f0d5e::t_9992210047af27 57-63,142-156
+tests/egress_units_test.sh
+  s_ca93edf61f0d5e::t_cb696d5cd64096 31-102
+tests/host/egress_ctl_test.sh
+  s_ca93edf61f0d5e::t_1384063ce665bf 10-12,149-199
+tests/host/proxy_swap/pc.py
+  s_ca93edf61f0d5e::t_24a4eb159b8b4c 2-4,9-29,38-60,92-109,124-125
+tests/lib/fake_egress_ctl
+  s_ca93edf61f0d5e::t_285094f4da13d4 10,28-35,59-62
+tests/lib/fake_incus
+  s_ca93edf61f0d5e::t_e0d1858f4da229 427-433
+tests/macos_setup_test.sh
+  s_ca93edf61f0d5e::t_cb4a15d06f84cc 1-122
+tests/memory_test.sh
+  s_ca93edf61f0d5e::t_de7537c3580688 71,77,82,89,94,97,100,107-117,129,131,135,140,144,147,161,165,170,184
+tests/net_test.sh
+  s_ca93edf61f0d5e::t_f8535a0617cb50 188-204
+tests/rm_test.sh
+  s_ca93edf61f0d5e::t_4442e13c9a1a3d 1-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ae75346db73372ab7b25f61bfc55fc2dab1c85eb",
+  "prompts": {},
+  "sessions": {
+    "s_ca93edf61f0d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09a75c5-e2d1-4edd-baab-34535d2ad01f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
