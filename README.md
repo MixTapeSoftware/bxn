@@ -295,6 +295,7 @@ Both directories are merged; on a `PLUGIN_ID` collision, the user plugin overrid
 | [GitHub Auth](https://cli.github.com/) | GitHub token & git credentials (the git identity is set for every container, with or without it) |
 | [Glow](https://github.com/charmbracelet/glow) | Terminal markdown viewer |
 | [just](https://github.com/casey/just) | Command runner for project tasks |
+| [lazygit](https://github.com/jesseduffield/lazygit) | Terminal UI for git. Opt-in (`--lazygit`); a pinned release binary in `~/.local/bin` |
 | [Matt Pocock Skills](https://github.com/mattpocock/skills) | Engineering and productivity skills for Claude Code, Codex, and Grok |
 | [MixTape Skills](https://github.com/MixTapeSoftware/skills) | MixTape Software's agent skills, including botfight, for Claude Code, Codex, and Grok (`--mixtape-skills`) |
 | [mermaid-ascii](https://github.com/AlexanderGrooff/mermaid-ascii) | Render mermaid diagrams as ASCII art |
