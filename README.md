@@ -33,7 +33,7 @@ Why shell scripts? They introduce no dependencies, are ergonomic enough for simp
 ## Prerequisites
 
 - **Linux**: [Incus](https://linuxcontainers.org/incus/docs/main/installing/) installed and initialized (`incus admin init`)
-- **macOS**: [Homebrew](https://brew.sh/) installed — `boxen.create` will automatically prompt to install Colima and the Incus CLI, then bootstrap a Colima VM with the Incus runtime
+- **macOS**: [Homebrew](https://brew.sh/) installed — `boxen.create` will automatically prompt to install Colima and the Incus CLI, then bootstrap a Colima VM with the Incus runtime. The VM mounts no folders from your Mac (with Colima 0.10.0 or later; an older one is warned about): instances get copies, never mounts, and Colima's default (your home directory, writable) would be within reach of anything that got out of a container. A profile made by an earlier bxn loses that mount the next time bxn starts it; while it's running, `bxn -c` warns about it
 - `~/.local/bin` in your `PATH`
 - `jq` — only for `bxn status` (preinstalled on macOS 15+; `sudo apt install jq` on Ubuntu)
 

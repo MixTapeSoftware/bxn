@@ -147,7 +147,8 @@ fresh
 rm -f "$SANDBOX/colima.log"
 PATH="$SANDBOX/mac:$PATH" create web --dry-run --no-tui </dev/null
 assert_eq "no Colima profile: the dry run ends well" "0" "$RC"
-assert_eq "…without creating or starting one" "colima list" "$(sort -u "$SANDBOX/colima.log")"
+assert_eq "…without creating or starting one" "colima list
+colima version" "$(sort -u "$SANDBOX/colima.log")"
 assert_contains "…saying the real run would" "The real run would first create the Colima profile 'boxen'" "$OUT"
 assert_eq "…and Incus isn't touched" "" "$(calls)"
 
@@ -155,7 +156,8 @@ printf '#!/bin/sh\necho "colima $*" >> "%s/colima.log"\n[ "$1" = list ] && echo 
 fresh
 rm -f "$SANDBOX/colima.log"
 PATH="$SANDBOX/mac:$PATH" create web --dry-run --no-tui </dev/null
-assert_eq "a stopped profile: not started" "colima list" "$(sort -u "$SANDBOX/colima.log")"
+assert_eq "a stopped profile: not started" "colima list
+colima version" "$(sort -u "$SANDBOX/colima.log")"
 assert_contains "…saying the real run would" "The real run would first start the Colima profile 'boxen'" "$OUT"
 
 # Another profile whose name starts the same is running; boxen isn't.
