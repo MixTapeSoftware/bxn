@@ -101,7 +101,8 @@ bxn -ua                               # Update all boxen containers
 bxn                                   # Live view of all instances (same as bxn status)
 bxn status                            # Live view of all instances; space starts/stops one, S force-stops it, D deletes it (asks first)
 bxn status --once                     # Print the status table once
-bxn rm my-project                     # Delete a container
+bxn rm my-project                     # Delete a container (asks first if it holds unpushed work)
+bxn rm --force my-project             # Delete it without checking
 bxn doctor                            # Check what would stop a create or start
 bxn plugins                           # Where the optional plugins come from, and what the next build offers
 bxn plugins update                    # Fetch a repository of plugins again
@@ -126,7 +127,7 @@ In a terminal, `bxn status` is a live view that refreshes every second. On a ter
 | `Tab` | Move the keys between the list and the details |
 | `Enter` | Give the keys to the details; on a narrow terminal, open them full screen |
 | `space` | Stop the highlighted instance if it is running, otherwise start it |
-| `D` | Delete the highlighted instance, after a `y`/`n` question; any other key cancels. Instances bxn didn't create and the egress container are refused |
+| `D` | Delete the highlighted instance, after a `y`/`n` question; any other key cancels. Instances bxn didn't create and the egress container are refused. A running container with work that isn't pushed isn't deleted; the message says what it found, and `bxn rm --force` deletes it anyway |
 | `Esc` | Back to the list from the details, otherwise quit |
 | `q` | Quit |
 
@@ -421,7 +422,9 @@ git diff main..origin/<branch>
 
 A fetch brings commits, never the container's git config or hooks. The commits can still change anything in the tree, including `package.json` scripts, `Makefile`s, `.envrc`, `.vscode/tasks.json` and hook managers like husky, so read the diff before you run it.
 
-The copy lives only in the container. Deleting the container (`bxn rm`) deletes any work you haven't pushed.
+The copy lives only in the container. Deleting the container deletes any work you haven't pushed, so `bxn rm` looks first. In the workspace's git repository it counts changed or new files, commits on no remote (on any branch, or a detached HEAD), and stashes. If it finds any, it asks before deleting, and when it isn't run from a terminal it refuses. It can't look inside a stopped container, or when the check fails (including a workspace it can't enter): then it asks, and off a terminal it says so and deletes as before. `bxn rm --force` skips the check.
+
+A commit counts as pushed once a remote branch the container knows of has it. A workspace copied from the host keeps the host's remote branches, so a commit made on the host and never pushed counts as unpushed here too.
 
 ### Daily Flow with tmux
 

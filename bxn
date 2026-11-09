@@ -76,7 +76,9 @@ Commands:
                                  list them, map tailnet HTTPS <port> to the
                                  app's <target> (default: the same), or remove
   -e, env <container> <VAR>      Set env variable (prompts silently, paste-friendly)
-  rm <container>                 Force delete a container
+  rm [--force] <container>       Delete a container. Without --force it first
+                                 looks for work in its workspace that isn't
+                                 pushed, and asks (off a terminal, refuses)
   -k, kill <container>           Stop a container
   -ka, kill-all                  Stop all boxen containers
   -u, update <container>         Update packages in a container
@@ -120,6 +122,7 @@ Examples:
   bxn -n your-container -l                  List proxies on your-container
   bxn -e your-container OPENAI_API_KEY      Set env var in your-container (prompts silently)
   bxn rm your-container                     Delete your-container
+  bxn rm --force your-container             Delete it without looking for unpushed work
   bxn -k your-container                     Stop your-container
   bxn -ka                       Stop all boxen containers
   bxn -u your-container                     Update packages in your-container
@@ -1290,6 +1293,80 @@ fi
 SNIPPET
 }
 
+# Run in the container as its user by rm_unpushed_counts, with the workspace
+# as $1. Kept out of $(...) so bash 3.2 never scans it for parens. Optional
+# locks off, so it never contends with git the agent is running. A missing
+# workspace holds nothing; one that is there but can't be entered is a check
+# that failed. Commits count from every branch and from HEAD, which may be
+# detached (mid-rebase, or checked out by hash); a repository with no
+# commits yet has no HEAD to count from.
+RM_CHECK_SCRIPT='
+export GIT_OPTIONAL_LOCKS=0
+[ -e "$1" ] || { echo "bxn-rm-check none"; exit 0; }
+cd "$1" || exit 1
+[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || { echo "bxn-rm-check none"; exit 0; }
+files=$(git status --porcelain) || exit 1
+stashes=$(git stash list) || exit 1
+head=
+git rev-parse -q --verify HEAD >/dev/null && head=HEAD
+commits=$(git rev-list --count --branches $head --not --remotes) || exit 1
+echo "bxn-rm-check $(printf "%s" "$files" | grep -c .) $commits $(printf "%s" "$stashes" | grep -c .)"
+'
+
+# What deleting <container> would lose from its workspace. Prints
+# "<changed or new files> <commits on no remote> <stashes>", "none" when the
+# workspace isn't a git repository, "stopped" when the container isn't
+# running, or nothing when the check failed. Only those words and numbers
+# come back from the container, so nothing it writes reaches the terminal.
+rm_unpushed_counts() {
+  local c="$1" ws ws_q out line
+  if [[ "$(incus list "^${c}\$" --format csv --columns s 2>/dev/null)" != RUNNING ]]; then
+    echo stopped
+    return 0
+  fi
+  ws="$(incus config get "$c" user.boxen.workspace 2>/dev/null || true)"
+  ws="${ws:-/workspace}"
+  printf -v ws_q '%q' "$ws"
+  # The user's login shell reads the -c line, so the %q quoting suits it.
+  out="$(printf '%s' "$RM_CHECK_SCRIPT" |
+    incus exec "$c" -- su - "$(id -un)" -c "timeout 30 sh -s -- $ws_q" 2>/dev/null)" || return 0
+  line="$(printf '%s\n' "$out" | grep -E '^bxn-rm-check (none|[0-9]+ [0-9]+ [0-9]+)$' | tail -n 1)" || return 0
+  echo "${line#bxn-rm-check }"
+}
+
+# "1 commit" or "2 commits". Usage: plural <n> <one> <many>
+plural() { if [[ "$1" == 1 ]]; then echo "1 $2"; else echo "$1 $3"; fi; }
+
+# Before bxn rm deletes <container>: if its workspace holds work that isn't
+# pushed, or bxn can't tell, asks on a terminal. Off one, refuses when there
+# is work and goes ahead (with a note) when it can't tell, as before.
+rm_confirm_unpushed() {
+  local c="$1" counts what list="" known=0 ans
+  counts="$(rm_unpushed_counts "$c")"
+  case "$counts" in
+    none|"0 0 0") return 0 ;;
+    stopped) what="$c isn't running, so bxn can't check it for work that isn't pushed" ;;
+    "") what="bxn couldn't check $c for work that isn't pushed" ;;
+    *)
+      set -- $counts
+      [[ "$1" == 0 ]] || list+=", $(plural "$1" "changed or new file" "changed or new files")"
+      [[ "$2" == 0 ]] || list+=", $(plural "$2" "commit on no remote" "commits on no remote")"
+      [[ "$3" == 0 ]] || list+=", $(plural "$3" stash stashes)"
+      what="$c has work that isn't pushed: ${list#, }"
+      known=1
+      ;;
+  esac
+  if [[ -t 0 ]]; then
+    echo -e "${YELLOW}[!]${NC} $what" >&2
+    read -r -p "Delete $c anyway? [y/N] " ans || ans=""
+    [[ "$ans" == y || "$ans" == Y ]] || { echo "Nothing deleted" >&2; exit 1; }
+  elif [[ $known == 1 ]]; then
+    error "$what. Push it first, or delete it anyway: bxn rm --force $c"
+  else
+    echo -e "${YELLOW}[!]${NC} $what" >&2
+  fi
+}
+
 # A bare bxn on a terminal opens the live status view. Piped, scripted, or
 # without jq for the view, it prints help instead.
 if [[ $# -eq 0 ]]; then
@@ -1346,11 +1423,17 @@ case "$1" in
     ;;
   rm|-d|delete)  # -d and delete are the old spellings, kept for scripts
     shift
-    [[ $# -lt 1 ]] && error "Usage: bxn rm <container>"
+    _force=0
+    _args=()
+    for _a in "$@"; do
+      if [[ "$_a" == --force || "$_a" == -f ]]; then _force=1; else _args+=("$_a"); fi
+    done
+    [[ ${#_args[@]} -lt 1 ]] && error "Usage: bxn rm [--force] <container>"
     # Deleting takes no default: chad-claude-web and chad-claude-web-1 make
     # bxn rm web ambiguous, though bxn web opens the first.
-    RESOLVE_STRICT=1 resolve_container_arg "$@"
+    RESOLVE_STRICT=1 resolve_container_arg "${_args[@]}"
     set -- "${RARGS[@]}"
+    [[ $_force == 1 ]] || rm_confirm_unpushed "$1"
     _egress="$(incus config get "$1" user.boxen.egress.container 2>/dev/null || true)"
     incus delete --force "$1"
     log "Deleted $1"
