@@ -68,41 +68,52 @@ GIB=1073741824
 
 echo "a container"
 fresh
-init box
+init box --container
 assert_eq "it builds" "0" "$RC"
 [[ "$RC" == 0 ]] || tail -20 "$SANDBOX/out"
 assert_eq "with the profile's limit, not one of its own" "" "$(cfg box limits.memory)"
 assert_contains "the summary says so" "Memory:      6GB (default)" "$(out)"
 fresh
-init mbox --memory 8GiB
+init mbox --container --memory 8GiB
 assert_eq "--memory builds" "0" "$RC"
 assert_eq "--memory gives it its own limit" "8GiB" "$(cfg mbox limits.memory)"
 assert_contains "and the summary names the flag" "Memory:      8GiB (--memory)" "$(out)"
 fresh
-init bad --memory lots
+init bad --container --memory lots
 assert_eq "a figure that isn't a size is refused" "1" "$RC"
 assert_contains "and told what one looks like" "--memory must be a size such as 8GiB or 6GB (got: lots)" "$(out)"
 assert_eq "nothing is created" "no" "$(exists bad)"
 
 echo "a plugin's floor"
 fresh
-init pbox --big
+init pbox --container --big
 assert_eq "it builds" "0" "$RC"
 assert_eq "the selected plugin raises the limit" "8GiB" "$(cfg pbox limits.memory)"
 assert_contains "and the build says why" "Memory: 8GiB (Big stack needs at least 8GiB)" "$(out)"
 fresh
-init pbox2 --big --memory 12GiB
+init pbox2 --container --big --memory 12GiB
 assert_eq "a larger --memory wins" "12GiB" "$(cfg pbox2 limits.memory)"
 fresh
-init pbox3 --big --memory 4GiB
+init pbox3 --container --big --memory 4GiB
 assert_eq "a smaller --memory doesn't undercut the floor" "8GiB" "$(cfg pbox3 limits.memory)"
 fresh
-init obox --odd
+init obox --container --odd
 assert_eq "a misdeclared floor doesn't stop the build" "0" "$RC"
 assert_eq "and is ignored" "" "$(cfg obox limits.memory)"
 assert_contains "with a warning naming the plugin" "Odd one: PLUGIN_MIN_MEMORY 'lots' isn't a size; ignored" "$(out)"
 
 echo "a VM"
+fresh
+init dbox --dry-run
+assert_eq "with no flag" "0" "$RC"
+assert_contains "it's a VM by default" "Type:        VM (disk=20GiB memory=4GiB cpus=4)" "$(out)"
+fresh
+init both --vm --container --dry-run
+assert_eq "--vm with --container is refused" "1" "$RC"
+assert_contains "saying so" "--vm and --container can't both be given" "$(out)"
+fresh
+init vcbox --container --vm-cpus 8 --dry-run
+assert_contains "VM options on a container are ignored, with a warning" "VM options (--vm-disk/--vm-cpus) are ignored for a container" "$(out)"
 fresh
 init vbox --vm --dry-run
 assert_eq "the dry run works" "0" "$RC"
@@ -115,25 +126,25 @@ fresh
 init vbox3 --vm --big --dry-run
 assert_contains "a plugin's floor applies to a VM too" "memory=8GiB" "$(out)"
 fresh
-init cbox --vm-memory 8GiB --dry-run
+init cbox --container --vm-memory 8GiB --dry-run
 assert_contains "--vm-memory on a container is --memory, not ignored" "Memory:      8GiB (--memory)" "$(out)"
-assert_eq "so there's no warning about VM options" "0" "$(out | grep -c 'are ignored without --vm' || true)"
+assert_eq "so there's no warning about VM options" "0" "$(out | grep -c 'are ignored for a container' || true)"
 
 echo "what the host can back"
 fresh
-FAKE_INCUS_MEMORY=$((8 * GIB)) init rbox --memory 8GiB
+FAKE_INCUS_MEMORY=$((8 * GIB)) init rbox --container --memory 8GiB
 assert_eq "all of an 8GiB host is refused" "1" "$RC"
 assert_contains "naming both figures" "This host has 8.0GiB of memory; rbox would get 8GiB (--memory), leaving it less than 2GiB. Choose less with --memory." "$(out)"
 assert_eq "nothing is created" "no" "$(exists rbox)"
 fresh
-FAKE_INCUS_MEMORY=$((8 * GIB)) init rbox2 --big
+FAKE_INCUS_MEMORY=$((8 * GIB)) init rbox2 --container --big
 assert_eq "a plugin's floor the host can't back is refused" "1" "$RC"
 assert_contains "and the plugin is named" "rbox2 would get 8GiB (Big stack needs at least 8GiB)" "$(out)"
 fresh
-FAKE_INCUS_MEMORY=$((8 * GIB)) init okbox
+FAKE_INCUS_MEMORY=$((8 * GIB)) init okbox --container
 assert_eq "the profile's 6GB fits an 8GiB host" "0" "$RC"
 fresh
-FAKE_INCUS_MEMORY=$((4 * GIB)) init sbox
+FAKE_INCUS_MEMORY=$((4 * GIB)) init sbox --container
 assert_eq "a small host still builds when nothing asked for memory" "0" "$RC"
 assert_contains "with a warning" "This host has 4.0GiB of memory, less than the profile's 6GB limit plus 2GiB" "$(out)"
 assert_eq "and the container keeps the profile's limit" "" "$(cfg sbox limits.memory)"
@@ -147,16 +158,16 @@ echo "where the host's memory comes from"
 # Without jq, the figure comes from incus info --resources, rounded.
 mkdir -p "$SANDBOX/nojq"; printf '#!/bin/sh\nexit 127\n' > "$SANDBOX/nojq/jq"; chmod +x "$SANDBOX/nojq/jq"
 fresh
-PATH="$SANDBOX/nojq:$PATH" FAKE_INCUS_MEMORY=$((8 * GIB + GIB / 2)) init tbox --memory 8GiB
+PATH="$SANDBOX/nojq:$PATH" FAKE_INCUS_MEMORY=$((8 * GIB + GIB / 2)) init tbox --container --memory 8GiB
 assert_eq "without jq the host is still measured" "1" "$RC"
 assert_contains "from incus info --resources, decimals and all" "This host has 8.5GiB of memory; tbox would get 8GiB" "$(out)"
 fresh
-PATH="$SANDBOX/nojq:$PATH" FAKE_INCUS_MEMORY=$((64 * GIB)) init tbox2 --memory 8GiB
+PATH="$SANDBOX/nojq:$PATH" FAKE_INCUS_MEMORY=$((64 * GIB)) init tbox2 --container --memory 8GiB
 assert_eq "and a host that can back it builds" "0" "$RC"
 # An Incus that won't say falls back to /proc/meminfo: this machine's. The
 # profile's default builds whatever its size. Either way nothing is skipped.
 fresh
-FAKE_INCUS_NO_RESOURCES=1 init fbox
+FAKE_INCUS_NO_RESOURCES=1 init fbox --container
 assert_eq "an Incus without resources still builds" "0" "$RC"
 if [[ -r /proc/meminfo ]]; then
   assert_eq "with /proc/meminfo measured, so no warning" "0" "$(out | grep -c "wasn't checked" || true)"
@@ -170,7 +181,7 @@ mkdir -p "$SANDBOX/mac"
 printf '#!/bin/sh\n[ $# -eq 0 ] && { echo Darwin; exit 0; }\nexec %s "$@"\n' "$(command -v uname)" > "$SANDBOX/mac/uname"
 chmod +x "$SANDBOX/mac/uname"
 fresh
-PATH="$SANDBOX/mac:$PATH" FAKE_INCUS_MEMORY=$((8 * GIB)) init mbox2 --memory 8GiB
+PATH="$SANDBOX/mac:$PATH" FAKE_INCUS_MEMORY=$((8 * GIB)) init mbox2 --container --memory 8GiB
 assert_eq "a Mac refuses the same way" "1" "$RC"
 assert_contains "and says how to resize Colima's VM" "leaving it less than 2GiB. Here that's Colima's VM, which --colima-memory sizes only when it's first made; to resize it: colima stop -p boxen && colima start -p boxen --memory N. Choose less with --memory." "$(out)"
 

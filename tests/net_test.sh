@@ -185,6 +185,23 @@ FAKE_INCUS_IMAGE_TYPE=virtual-machine init vmbox
 assert_eq "a VM launches" "0" "$RC"
 assert_eq "a VM keeps the default profile and joins the network's" "default boxen-net" "$(inst vmbox profiles | tr '\n' ' ' | sed 's/ $//')"
 
+# A template's type decides when no flag does; a flag that contradicts it is
+# refused before anything is created.
+fresh; template
+init ctbox
+assert_eq "a container template launches without --container" "0" "$RC"
+assert_contains "as a container" "launching as a container" "$(cat "$SANDBOX/out")"
+assert_eq "with a container's profiles" "default boxen boxen-net" "$(inst ctbox profiles | tr '\n' ' ' | sed 's/ $//')"
+init ctvm --vm
+assert_eq "--vm on a container template is refused" "1" "$RC"
+assert_contains "saying why" "is a container image; drop --vm" "$(cat "$SANDBOX/out")"
+assert_eq "and nothing is created" "no" "$([[ -d "$FAKE_INCUS_STATE/instances/ctvm" ]] && echo yes || echo no)"
+fresh; template
+FAKE_INCUS_IMAGE_TYPE=virtual-machine init vmct --container
+assert_eq "--container on a VM template is refused" "1" "$RC"
+assert_contains "saying why" "is a VM image; drop --container" "$(cat "$SANDBOX/out")"
+assert_eq "and nothing is created" "no" "$([[ -d "$FAKE_INCUS_STATE/instances/vmct" ]] && echo yes || echo no)"
+
 fresh; template
 init open --insecure-network
 assert_eq "--insecure-network launches" "0" "$RC"

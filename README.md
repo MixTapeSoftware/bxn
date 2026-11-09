@@ -51,8 +51,9 @@ It then offers to install [Chadmux](https://github.com/chadfennell/chadmux), Cha
 ## Quick Start
 
 ```bash
-# Create a container with a copy of the current directory in /workspace and
-# one coding agent. It's named HANDLE-AGENT-PROJECT, here chad-claude-my-project.
+# Create a VM (--container for a system container) with a copy of the
+# current directory in /workspace and one coding agent. It's named
+# HANDLE-AGENT-PROJECT, here chad-claude-my-project.
 bxn -c my-project --agent claude
 # Or: --agent codex, --agent grok, or --agent shell for none
 
@@ -146,7 +147,8 @@ Options:
   --<plugin>                Pre-select a plugin (e.g. --1pass, --gh-token)
   --agent NAME              The coding agent: claude, codex, grok, or shell for none
   --name NAME               Use NAME exactly, instead of HANDLE-AGENT-PROJECT
-  --vm                      Provision a KVM virtual machine instead of a container
+  --vm                      Provision a KVM virtual machine (the default)
+  --container               Provision a system container instead of a VM
   --no-copy                 Start with an empty workspace instead of copying the host directory
   --insecure-network        Use the default bridge: no isolation from other instances or the host
   --egress MODE             Internet allowlist: enforce (default), report or off
@@ -155,7 +157,7 @@ Options:
                             (owner/repo[#ref]), a git URL, or a directory, in
                             place of ours; the agents stay. "builtin" is ours
   --memory SIZE             Memory limit, e.g. 8GiB (default: the boxen profile's
-                            6GB for a container, 4GiB for a VM; a selected plugin
+                            4GiB for a VM, 6GB for a container; a selected plugin
                             can raise it). Refused when the host can't back it
   --vm-disk SIZE            VM root disk size (default: 20GiB)
   --vm-memory SIZE          Same as --memory
@@ -168,7 +170,7 @@ Options:
 
 ### What boxen.create does
 
-1. Launches an Ubuntu 24.04 container (override with `--image`) with the `boxen` profile: no nesting, unprivileged, isolated idmap, 6GB / 4 CPU limits. It joins the `boxenbr0` bridge, isolated from other instances and the host (see [Network Isolation](#network-isolation))
+1. Launches an Ubuntu 24.04 KVM virtual machine (override with `--image`): 20GiB disk, 4GiB memory, 4 vCPUs (see [Virtual Machines](#virtual-machines)). With `--container` it's a system container with the `boxen` profile instead: no nesting, unprivileged, isolated idmap, 6GB / 4 CPU limits. Either way it joins the `boxenbr0` bridge, isolated from other instances and the host (see [Network Isolation](#network-isolation))
 2. Installs build tools, dev libraries, Python, and Node.js
 3. Creates a user matching your host UID/GID (no sudo by default; use `bxn shell --with-sudo` for interactive sessions), with your git identity: the `user.name` and `user.email` git would use in the folder you're copying, so a repository's own identity or an `includeIf` for its path (a work email for `~/work`) carries over, else your global one. With none on the host it asks; a template carries no one's
 4. Copies your current directory into `/workspace`, `.git` and uncommitted work included, owned by your user. Nothing on the host is mounted (see [Getting work out](#getting-work-out)). Given a repository's URL, it clones that instead (see [Starting from a GitHub repository](#starting-from-a-github-repository))
@@ -508,20 +510,23 @@ started again with its tokens and Tailscale state back in place.
 
 ### Virtual Machines
 
-Add `--vm` to provision a KVM virtual machine (its own kernel) instead of a
-system container. Everything else — provisioning, plugins, user, shell — is
-identical; only the workspace model and resources differ.
+`bxn -c` provisions a KVM virtual machine (its own kernel) by default. Add
+`--container` for a system container instead. Everything else — provisioning,
+plugins, user, shell — is identical; only the resources differ. `--vm` is
+accepted and says the default out loud.
 
 ```bash
-bxn -c --vm my-vm                          # VM; copies your cwd into /workspace (incl .git)
-bxn -c --vm --no-copy my-vm                # VM with an empty /workspace
-bxn -c --vm --memory 8GiB --vm-cpus 8 my-vm   # override resources
+bxn -c my-vm                               # VM; copies your cwd into /workspace (incl .git)
+bxn -c --no-copy my-vm                     # VM with an empty /workspace
+bxn -c --memory 8GiB --vm-cpus 8 my-vm     # override resources
+bxn -c --container my-ct                   # a system container
 ```
 
 **Workspace:** the same as a container: your working tree is copied in
 (including `.git`), and `--no-copy` starts empty. Resource
 defaults are `20GiB` disk / `4GiB` memory / `4` vCPUs (override with
-`--vm-disk`/`--memory`/`--vm-cpus`). `--memory` works for containers too,
+`--vm-disk`/`--memory`/`--vm-cpus`; the `--vm-*` ones are ignored, with a
+warning, for a container). `--memory` works for containers too,
 which otherwise share the boxen profile's 6GB limit; a plugin that needs
 more raises it, and a figure the host can't back is refused.
 
@@ -530,20 +535,25 @@ more raises it, and a figure the host can't back is refused.
 container-only and would be rejected by Incus), and Tailscale uses the VM's
 native `/dev/net/tun` instead of a device passthrough.
 
-**Templates work the same.** Build a VM template with `--vm`; launches from it
-are VMs automatically, because a published VM image can only launch as a VM.
+**Templates work the same.** A template has the type it was built with, and
+launches from it take that type, because a published image can only launch as
+what it is.
 
 ```bash
-bxn -c --vm --template my-vm-base          # publishes a VM-type template
-bxn -c --from my-vm-base my-vm             # launches as a VM; --vm is inferred
+bxn -c --template my-vm-base               # publishes a VM-type template
+bxn -c --from my-vm-base my-vm             # launches as a VM
+bxn -c --container --template my-ct-base   # publishes a container template
+bxn -c --from my-ct-base my-ct             # launches as a container; --container is inferred
 ```
 
-Adding `--vm` to a launch from a container template fails early with a clear
-image-type message rather than a cryptic Incus error. The `--vm-*` resource
-options apply to a VM launched from a template too.
+A flag that contradicts the template's type (`--vm` with a container template,
+`--container` with a VM template) fails early with a clear image-type message
+rather than a cryptic Incus error. The `--vm-*` resource options apply to a VM
+launched from a template too.
 
 > Requires a host that can run VMs (KVM / `/dev/kvm`). On macOS this is the
-> Colima VM that `boxen.create` bootstraps.
+> Colima VM that `boxen.create` bootstraps. On a host without KVM, pass
+> `--container`.
 
 
 ### Tailscale
