@@ -82,6 +82,7 @@ H=""
 home() { H="$SANDBOX/home-$RANDOM$RANDOM"; mkdir -p "$H"; }
 run_net() { printf '%s' "$CODEX_NETWORK_SCRIPT" | HOME="$H" sh -s; }
 cfg_of() { cat "$H/.codex/config.toml"; }
+mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 echo "network: no config"
 home
@@ -120,15 +121,15 @@ home; mkdir -p "$H/.codex"
 printf 'model = "gpt-5"\n' > "$H/.codex/config.toml"
 chmod 600 "$H/.codex/config.toml"
 (umask 022; run_net)
-assert_eq "a private config stays private" "600" "$(stat -c %a "$H/.codex/config.toml")"
+assert_eq "a private config stays private" "600" "$(mode "$H/.codex/config.toml")"
 home; mkdir -p "$H/.codex"
 printf 'model = "gpt-5"\n' > "$H/.codex/config.toml"
 chmod 640 "$H/.codex/config.toml"
 run_net
-assert_eq "…and any other mode is kept" "640" "$(stat -c %a "$H/.codex/config.toml")"
+assert_eq "…and any other mode is kept" "640" "$(mode "$H/.codex/config.toml")"
 home
 (umask 022; run_net)
-assert_eq "a new config is private" "600" "$(stat -c %a "$H/.codex/config.toml")"
+assert_eq "a new config is private" "600" "$(mode "$H/.codex/config.toml")"
 
 echo "network: a linked config"
 home; mkdir -p "$H/.codex" "$H/dotfiles"

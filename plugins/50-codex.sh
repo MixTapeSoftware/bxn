@@ -96,24 +96,22 @@ if [ -f "$cfg" ] && grep -q "sandbox_workspace_write" "$cfg"; then
 fi
 mkdir -p "$dir"
 tmp="$cfg.bxn-new"
-# The config can hold tokens (an MCP server'"'"'s env, say): the new file is
-# private from the start, then takes the old one'"'"'s mode.
+# The config can hold tokens (an MCP server'"'"'s env, say): a new one is
+# private, and an old one'"'"'s copy keeps its mode (cp -p, which macOS has
+# too, for the tests).
 umask 077
 rm -f "$tmp"
-{
-  if [ -s "$cfg" ]; then
-    cat "$cfg"
-    printf "\n"
-  fi
-  printf "%s\n" \
-    "# bxn: commands Codex runs may use the network. The box'"'"'s egress allowlist" \
-    "# decides which hosts they reach." \
-    "[sandbox_workspace_write]" \
-    "network_access = true"
-} > "$tmp"
 if [ -f "$cfg" ]; then
-  chmod --reference="$cfg" "$tmp"
+  cp -p "$cfg" "$tmp"
+  if [ -s "$cfg" ]; then
+    printf "\n" >> "$tmp"
+  fi
 fi
+printf "%s\n" \
+  "# bxn: commands Codex runs may use the network. The box'"'"'s egress allowlist" \
+  "# decides which hosts they reach." \
+  "[sandbox_workspace_write]" \
+  "network_access = true" >> "$tmp"
 mv "$tmp" "$cfg"
 '
 
