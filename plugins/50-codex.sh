@@ -96,6 +96,10 @@ if [ -f "$cfg" ] && grep -q "sandbox_workspace_write" "$cfg"; then
 fi
 mkdir -p "$dir"
 tmp="$cfg.bxn-new"
+# The config can hold tokens (an MCP server'"'"'s env, say): the new file is
+# private from the start, then takes the old one'"'"'s mode.
+umask 077
+rm -f "$tmp"
 {
   if [ -s "$cfg" ]; then
     cat "$cfg"
@@ -107,6 +111,9 @@ tmp="$cfg.bxn-new"
     "[sandbox_workspace_write]" \
     "network_access = true"
 } > "$tmp"
+if [ -f "$cfg" ]; then
+  chmod --reference="$cfg" "$tmp"
+fi
 mv "$tmp" "$cfg"
 '
 

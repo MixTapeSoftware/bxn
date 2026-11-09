@@ -116,6 +116,20 @@ printf 'sandbox_workspace_write.network_access = false\n' > "$H/.codex/config.to
 run_net
 assert_eq "…nor a dotted key, which a second table would break" 'sandbox_workspace_write.network_access = false' "$(cfg_of)"
 
+home; mkdir -p "$H/.codex"
+printf 'model = "gpt-5"\n' > "$H/.codex/config.toml"
+chmod 600 "$H/.codex/config.toml"
+(umask 022; run_net)
+assert_eq "a private config stays private" "600" "$(stat -c %a "$H/.codex/config.toml")"
+home; mkdir -p "$H/.codex"
+printf 'model = "gpt-5"\n' > "$H/.codex/config.toml"
+chmod 640 "$H/.codex/config.toml"
+run_net
+assert_eq "…and any other mode is kept" "640" "$(stat -c %a "$H/.codex/config.toml")"
+home
+(umask 022; run_net)
+assert_eq "a new config is private" "600" "$(stat -c %a "$H/.codex/config.toml")"
+
 echo "network: a linked config"
 home; mkdir -p "$H/.codex" "$H/dotfiles"
 printf 'model = "gpt-5"\n' > "$H/dotfiles/codex.toml"
