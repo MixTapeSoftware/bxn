@@ -149,6 +149,8 @@ bitbucket.org
 dev.azure.com
 # upload.
 sourceforge.net
+# upload: repositories and releases. Some Neovim plugins live here.
+codeberg.org
 
 # --- Container registries ----------------------------------------------------
 # upload: images.
