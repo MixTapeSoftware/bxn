@@ -1,0 +1,26 @@
+plugins/50-lazygit.sh
+  s_ca93edf61f0d5e::t_9278c3847ea259 37-43,52-56
+  s_ca93edf61f0d5e::t_f02b491e82c46e 1-36,44-51,57-59
+README.md
+  s_ca93edf61f0d5e::t_16a1339c43efb5 298
+tests/lazygit_plugin_test.sh
+  s_ca93edf61f0d5e::t_bb944e54ac018f 221
+  s_ca93edf61f0d5e::t_62d3148ea17e37 1-220,222-236
+  s_ca93edf61f0d5e::t_a329cc698b8160 237-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3ef561bf30f3f14628e7d16de63ced40eeed1143",
+  "prompts": {},
+  "sessions": {
+    "s_ca93edf61f0d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09a75c5-e2d1-4edd-baab-34535d2ad01f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
