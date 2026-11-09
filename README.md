@@ -25,6 +25,7 @@ Why shell scripts? They introduce no dependencies, are ergonomic enough for simp
   - [Network Isolation](#network-isolation)
   - [Egress Allowlist](#egress-allowlist)
   - [Networking: what the proxy sees, and its limits](NETWORKING.md)
+- [The sandbox: what it stops, and what it doesn't](SANDBOX.md)
 - [Runtime Management](#runtime-management)
 - [Linux Gotchas](#linux-gotchas)
 - [Tests](#tests)
@@ -383,7 +384,7 @@ Plugin files are sourced in a **separate bash process** to safely extract metada
 
 Each container gets its own copy of the directory you create it from, `.git` and uncommitted work included. Nothing on the host is mounted into it, so the container can do what it likes to its copy and the host only sees work that leaves through git (see [Getting work out](#getting-work-out)).
 
-Containers have no sudo by default, which takes away an AI agent's easiest route to root. It does not rule escalation out. The Docker plugin (`--docker`, off by default) puts the user in the `docker` group, which is as good as root inside the container. And anything running as your user can edit your shell startup files, which a later `--with-sudo` session will run. Treat the container as the boundary. Use `bxn shell --with-sudo` when you need to install packages interactively:
+Containers have no sudo by default, which takes away an AI agent's easiest route to root. It does not rule escalation out. The Docker plugin (`--docker`, off by default) puts the user in the `docker` group, which is as good as root inside the container. And anything running as your user can edit your shell startup files, which a later `--with-sudo` session will run. Treat the container as the boundary; [SANDBOX.md](SANDBOX.md) lists what it doesn't stop. Use `bxn shell --with-sudo` when you need to install packages interactively:
 
 ```mermaid
 graph LR
