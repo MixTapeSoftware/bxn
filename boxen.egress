@@ -77,20 +77,26 @@ egress_ensure_approved() {
 }
 
 # Every host an agent may reach, sorted: the approved baseline, the user's
-# additions, the plugins' additions recorded on the agent, and the agent's own.
-# Fails when any part can't be read, such as a list with a bad line: a policy
-# built from the rest would drop hosts without a word. Callers check, since
-# error() inside $(...) ends only that subshell.
+# additions, the plugins' additions recorded on the agent, and the agent's own,
+# less the entries removed for the agent (user.boxen.egress.deny). With
+# user.boxen.egress.baseline=off, the baseline and the user's additions are
+# left out. Fails when any part can't be read, such as a list with a bad line
+# or the removed list: a policy built from the rest would change hosts without
+# a word. Callers check, since error() inside $(...) ends only that subshell.
 # Usage: egress_hosts <agent>
 egress_hosts() {
-  local agent="$1" approved user plugins own
+  local agent="$1" approved="" user="" plugins own deny baseline
   egress_ensure_approved
-  approved="$(egress_read_hosts "$EGRESS_APPROVED")" || return 1
-  user="$(egress_read_hosts "$EGRESS_USER_HOSTS")" || return 1
+  baseline="$(incus config get "$agent" user.boxen.egress.baseline 2>/dev/null)" || return 1
+  if [[ "$baseline" != off ]]; then
+    approved="$(egress_read_hosts "$EGRESS_APPROVED")" || return 1
+    user="$(egress_read_hosts "$EGRESS_USER_HOSTS")" || return 1
+  fi
   plugins="$(incus config get "$agent" user.boxen.egress.plugin-allow 2>/dev/null)" || return 1
   own="$(incus config get "$agent" user.boxen.egress.allow 2>/dev/null)" || return 1
+  deny="$(incus config get "$agent" user.boxen.egress.deny 2>/dev/null)" || return 1
   { printf '%s\n' "$approved" "$user"; egress_split "$plugins"; egress_split "$own"; } |
-    sed '/^$/d' | LC_ALL=C sort -u
+    sed '/^$/d' | LC_ALL=C sort -u | egress_drop "$deny"
 }
 
 # The policy identity of an agent's hosts, and its upload lines when its
@@ -100,6 +106,19 @@ egress_hosts_id() {
   local spec
   spec="$(egress_spec "$1" "$3")" || return 1
   printf '%s\n' "$spec" | egress_policy_id "$2" "$3"
+}
+
+# Whether the agent's list includes the baseline and the user's additions.
+egress_baseline_on() {
+  [[ "$(incus config get "$1" user.boxen.egress.baseline 2>/dev/null)" != off ]]
+}
+
+# Lines whose first tab-separated field isn't an entry of a comma-separated
+# list, matched exactly: a removed wildcard entry removes only that entry.
+# Usage: egress_drop <list> < lines
+egress_drop() {
+  awk -F'\t' -v drop="$1" 'BEGIN { n = split(drop, a, ","); for (i = 1; i <= n; i++) d[a[i]] = 1 }
+                           !($1 in d)'
 }
 
 egress_sha256() {
