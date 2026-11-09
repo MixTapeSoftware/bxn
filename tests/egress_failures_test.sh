@@ -152,6 +152,18 @@ assert_eq "so the baseline stays out" no "$(allows box api.anthropic.com)"
 run baseline box on
 assert_eq "turning it back on restores the host" yes "$(allows box api.anthropic.com)"
 
+echo "an upload cap that can't be read"
+run upload-cap box on
+assert_contains "box's proxy cuts uploads" "upload-cap on" "$(gen_file box upload)"
+good_gen="$(gen_of box)"
+FAKE_INCUS_FAIL_CALL='^config get box user.boxen.egress.upload-cap$' run refresh box
+assert_eq "refresh fails when the cap can't be read" "1" "$RC"
+assert_eq "and keeps the policy" "$good_gen" "$(gen_of box)"
+assert_contains "so the cap stays on" "upload-cap on" "$(gen_file box upload)"
+FAKE_INCUS_FAIL_CALL='^config get box user.boxen.egress.upload-cap$' run ls
+assert_contains "ls says the lists can't be read" "can't read its host lists" "$(grep '^box ' <<< "$OUT")"
+run upload-cap box off
+
 echo "a container list that can't be read under the lock"
 # The first list, for the question, works; the second, under the lock, fails.
 mv "$SANDBOX/bin/incus" "$SANDBOX/bin/incus.real"
@@ -221,7 +233,7 @@ assert_contains "box2 was locked meanwhile" "locked" "$(cat "$FAKE_INCUS_STATE/h
 assert_eq "box's proxy drops bulk.example" no "$(allows box bulk.example)"
 assert_eq "and so does box2's" no "$(allows box2 bulk.example)"
 run ls
-assert_not_contains "ls has nothing to refresh" "hosts changed since applied" "$OUT"
+assert_not_contains "ls has nothing to refresh" "changed since applied" "$OUT"
 
 echo "a lockdown whose container status can't be read"
 make_box d 10.201.0.80

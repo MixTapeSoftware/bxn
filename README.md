@@ -24,6 +24,8 @@ Why shell scripts? They introduce no dependencies, are ergonomic enough for simp
   - [Snapshots](#snapshots)
   - [Network Isolation](#network-isolation)
   - [Egress Allowlist](#egress-allowlist)
+  - [Networking: what the proxy sees, and its limits](NETWORKING.md)
+- [The sandbox: what it stops, and what it doesn't](SANDBOX.md)
 - [Runtime Management](#runtime-management)
 - [Linux Gotchas](#linux-gotchas)
 - [Tests](#tests)
@@ -31,7 +33,7 @@ Why shell scripts? They introduce no dependencies, are ergonomic enough for simp
 ## Prerequisites
 
 - **Linux**: [Incus](https://linuxcontainers.org/incus/docs/main/installing/) installed and initialized (`incus admin init`)
-- **macOS**: [Homebrew](https://brew.sh/) installed — `boxen.create` will automatically prompt to install Colima and the Incus CLI, then bootstrap a Colima VM with the Incus runtime
+- **macOS**: [Homebrew](https://brew.sh/) installed — `boxen.create` will automatically prompt to install Colima and the Incus CLI, then bootstrap a Colima VM with the Incus runtime. The VM mounts no folders from your Mac (with Colima 0.10.0 or later; an older one is warned about): instances get copies, never mounts, and Colima's default (your home directory, writable) would be within reach of anything that got out of a container. A profile made by an earlier bxn loses that mount the next time bxn starts it; while it's running, `bxn -c` warns about it
 - `~/.local/bin` in your `PATH`
 - `jq` — only for `bxn status` (preinstalled on macOS 15+; `sudo apt install jq` on Ubuntu)
 
@@ -50,8 +52,9 @@ It then offers to install [Chadmux](https://github.com/chadfennell/chadmux), Cha
 ## Quick Start
 
 ```bash
-# Create a container with a copy of the current directory in /workspace and
-# one coding agent. It's named HANDLE-AGENT-PROJECT, here chad-claude-my-project.
+# Create a VM (--container for a system container) with a copy of the
+# current directory in /workspace and one coding agent. It's named
+# HANDLE-AGENT-PROJECT, here chad-claude-my-project.
 bxn -c my-project --agent claude
 # Or: --agent codex, --agent grok, or --agent shell for none
 
@@ -85,7 +88,9 @@ bxn my-project                        # Shell into container (default)
 bxn -s my-project                     # Shell (explicit)
 bxn -s my-project mix test            # Run a command in container
 bxn -s my-project "mix test | tail"   # One quoted string runs as a shell line
-bxn -c my-project                     # Create a new container
+bxn -c my-project                     # Create a new VM
+bxn -c my-project --container         # Create a system container instead
+bxn -c --template base-dev            # Save a reusable template named base-dev
 bxn -c my-project --from base-dev     # Create from template
 bxn create my-project https://github.com/OWNER/REPO   # Create with that repository cloned in
 bxn -n my-project 4000 3241           # Proxy ports 4000 and 3241 to localhost
@@ -99,7 +104,8 @@ bxn -ua                               # Update all boxen containers
 bxn                                   # Live view of all instances (same as bxn status)
 bxn status                            # Live view of all instances; space starts/stops one, S force-stops it, D deletes it (asks first)
 bxn status --once                     # Print the status table once
-bxn rm my-project                     # Delete a container
+bxn rm my-project                     # Delete a container (asks first if it holds unpushed work)
+bxn rm --force my-project             # Delete it without checking
 bxn doctor                            # Check what would stop a create or start
 bxn plugins                           # Where the optional plugins come from, and what the next build offers
 bxn plugins update                    # Fetch a repository of plugins again
@@ -124,7 +130,7 @@ In a terminal, `bxn status` is a live view that refreshes every second. On a ter
 | `Tab` | Move the keys between the list and the details |
 | `Enter` | Give the keys to the details; on a narrow terminal, open them full screen |
 | `space` | Stop the highlighted instance if it is running, otherwise start it |
-| `D` | Delete the highlighted instance, after a `y`/`n` question; any other key cancels. Instances bxn didn't create and the egress container are refused |
+| `D` | Delete the highlighted instance, after a `y`/`n` question; any other key cancels. Instances bxn didn't create and the egress container are refused. A running container with work that isn't pushed isn't deleted; the message says what it found, and `bxn rm --force` deletes it anyway |
 | `Esc` | Back to the list from the details, otherwise quit |
 | `q` | Quit |
 
@@ -145,7 +151,8 @@ Options:
   --<plugin>                Pre-select a plugin (e.g. --1pass, --gh-token)
   --agent NAME              The coding agent: claude, codex, grok, or shell for none
   --name NAME               Use NAME exactly, instead of HANDLE-AGENT-PROJECT
-  --vm                      Provision a KVM virtual machine instead of a container
+  --vm                      Provision a KVM virtual machine (the default)
+  --container               Provision a system container instead of a VM
   --no-copy                 Start with an empty workspace instead of copying the host directory
   --insecure-network        Use the default bridge: no isolation from other instances or the host
   --egress MODE             Internet allowlist: enforce (default), report or off
@@ -154,7 +161,7 @@ Options:
                             (owner/repo[#ref]), a git URL, or a directory, in
                             place of ours; the agents stay. "builtin" is ours
   --memory SIZE             Memory limit, e.g. 8GiB (default: the boxen profile's
-                            6GB for a container, 4GiB for a VM; a selected plugin
+                            4GiB for a VM, 6GB for a container; a selected plugin
                             can raise it). Refused when the host can't back it
   --vm-disk SIZE            VM root disk size (default: 20GiB)
   --vm-memory SIZE          Same as --memory
@@ -167,7 +174,7 @@ Options:
 
 ### What boxen.create does
 
-1. Launches an Ubuntu 24.04 container (override with `--image`) with the `boxen` profile: no nesting, unprivileged, isolated idmap, 6GB / 4 CPU limits. It joins the `boxenbr0` bridge, isolated from other instances and the host (see [Network Isolation](#network-isolation))
+1. Launches an Ubuntu 24.04 KVM virtual machine (override with `--image`): 20GiB disk, 4GiB memory, 4 vCPUs (see [Virtual Machines](#virtual-machines)). With `--container` it's a system container with the `boxen` profile instead: no nesting, unprivileged, isolated idmap, 6GB / 4 CPU limits. Either way it joins the `boxenbr0` bridge, isolated from other instances and the host (see [Network Isolation](#network-isolation))
 2. Installs build tools, dev libraries, Python, and Node.js
 3. Creates a user matching your host UID/GID (no sudo by default; use `bxn shell --with-sudo` for interactive sessions), with your git identity: the `user.name` and `user.email` git would use in the folder you're copying, so a repository's own identity or an `includeIf` for its path (a work email for `~/work`) carries over, else your global one. With none on the host it asks; a template carries no one's
 4. Copies your current directory into `/workspace`, `.git` and uncommitted work included, owned by your user. Nothing on the host is mounted (see [Getting work out](#getting-work-out)). Given a repository's URL, it clones that instead (see [Starting from a GitHub repository](#starting-from-a-github-repository))
@@ -379,7 +386,7 @@ Plugin files are sourced in a **separate bash process** to safely extract metada
 
 Each container gets its own copy of the directory you create it from, `.git` and uncommitted work included. Nothing on the host is mounted into it, so the container can do what it likes to its copy and the host only sees work that leaves through git (see [Getting work out](#getting-work-out)).
 
-Containers have no sudo by default, which takes away an AI agent's easiest route to root. It does not rule escalation out. The Docker plugin (`--docker`, off by default) puts the user in the `docker` group, which is as good as root inside the container. And anything running as your user can edit your shell startup files, which a later `--with-sudo` session will run. Treat the container as the boundary. Use `bxn shell --with-sudo` when you need to install packages interactively:
+Containers have no sudo by default, which takes away an AI agent's easiest route to root. It does not rule escalation out. The Docker plugin (`--docker`, off by default) puts the user in the `docker` group, which is as good as root inside the container. And anything running as your user can edit your shell startup files, which a later `--with-sudo` session will run. Treat the container as the boundary; [SANDBOX.md](SANDBOX.md) lists what it doesn't stop. Use `bxn shell --with-sudo` when you need to install packages interactively:
 
 ```mermaid
 graph LR
@@ -418,7 +425,9 @@ git diff main..origin/<branch>
 
 A fetch brings commits, never the container's git config or hooks. The commits can still change anything in the tree, including `package.json` scripts, `Makefile`s, `.envrc`, `.vscode/tasks.json` and hook managers like husky, so read the diff before you run it.
 
-The copy lives only in the container. Deleting the container (`bxn rm`) deletes any work you haven't pushed.
+The copy lives only in the container. Deleting the container deletes any work you haven't pushed, so `bxn rm` looks first. In the workspace's git repository it counts changed or new files, commits on no remote (on any branch, or a detached HEAD), and stashes. If it finds any, it asks before deleting, and when it isn't run from a terminal it refuses. It can't look inside a stopped container, or when the check fails (including a workspace it can't enter): then it asks, and off a terminal it says so and deletes as before. `bxn rm --force` skips the check.
+
+A commit counts as pushed once a remote branch the container knows of has it. A workspace copied from the host keeps the host's remote branches, so a commit made on the host and never pushed counts as unpushed here too.
 
 ### Daily Flow with tmux
 
@@ -507,20 +516,23 @@ started again with its tokens and Tailscale state back in place.
 
 ### Virtual Machines
 
-Add `--vm` to provision a KVM virtual machine (its own kernel) instead of a
-system container. Everything else — provisioning, plugins, user, shell — is
-identical; only the workspace model and resources differ.
+`bxn -c` provisions a KVM virtual machine (its own kernel) by default. Add
+`--container` for a system container instead. Everything else — provisioning,
+plugins, user, shell — is identical; only the resources differ. `--vm` is
+accepted and says the default out loud.
 
 ```bash
-bxn -c --vm my-vm                          # VM; copies your cwd into /workspace (incl .git)
-bxn -c --vm --no-copy my-vm                # VM with an empty /workspace
-bxn -c --vm --memory 8GiB --vm-cpus 8 my-vm   # override resources
+bxn -c my-vm                               # VM; copies your cwd into /workspace (incl .git)
+bxn -c --no-copy my-vm                     # VM with an empty /workspace
+bxn -c --memory 8GiB --vm-cpus 8 my-vm     # override resources
+bxn -c --container my-ct                   # a system container
 ```
 
 **Workspace:** the same as a container: your working tree is copied in
 (including `.git`), and `--no-copy` starts empty. Resource
 defaults are `20GiB` disk / `4GiB` memory / `4` vCPUs (override with
-`--vm-disk`/`--memory`/`--vm-cpus`). `--memory` works for containers too,
+`--vm-disk`/`--memory`/`--vm-cpus`; the `--vm-*` ones are ignored, with a
+warning, for a container). `--memory` works for containers too,
 which otherwise share the boxen profile's 6GB limit; a plugin that needs
 more raises it, and a figure the host can't back is refused.
 
@@ -529,20 +541,25 @@ more raises it, and a figure the host can't back is refused.
 container-only and would be rejected by Incus), and Tailscale uses the VM's
 native `/dev/net/tun` instead of a device passthrough.
 
-**Templates work the same.** Build a VM template with `--vm`; launches from it
-are VMs automatically, because a published VM image can only launch as a VM.
+**Templates work the same.** A template has the type it was built with, and
+launches from it take that type, because a published image can only launch as
+what it is.
 
 ```bash
-bxn -c --vm --template my-vm-base          # publishes a VM-type template
-bxn -c --from my-vm-base my-vm             # launches as a VM; --vm is inferred
+bxn -c --template my-vm-base               # publishes a VM-type template
+bxn -c --from my-vm-base my-vm             # launches as a VM
+bxn -c --container --template my-ct-base   # publishes a container template
+bxn -c --from my-ct-base my-ct             # launches as a container; --container is inferred
 ```
 
-Adding `--vm` to a launch from a container template fails early with a clear
-image-type message rather than a cryptic Incus error. The `--vm-*` resource
-options apply to a VM launched from a template too.
+A flag that contradicts the template's type (`--vm` with a container template,
+`--container` with a VM template) fails early with a clear image-type message
+rather than a cryptic Incus error. The `--vm-*` resource options apply to a VM
+launched from a template too.
 
 > Requires a host that can run VMs (KVM / `/dev/kvm`). On macOS this is the
-> Colima VM that `boxen.create` bootstraps.
+> Colima VM that `boxen.create` bootstraps. On a host without KVM, pass
+> `--container`.
 
 
 ### Tailscale
@@ -755,7 +772,7 @@ Instances created before this keep the default bridge. What changes for new ones
 
 ### Egress Allowlist
 
-`bxn egress` limits which internet hosts a container on `boxenbr0` can reach. Its traffic goes through its own [smokescreen](https://github.com/stripe/smokescreen) proxy in an egress container (`boxen-egress`), and its network card lets it reach nothing but that proxy. Nothing is decrypted: the proxy sees only the hostname each connection asks for.
+`bxn egress` limits which internet hosts a container on `boxenbr0` can reach. Its traffic goes through its own [smokescreen](https://github.com/stripe/smokescreen) proxy in an egress container (`boxen-egress`), and its network card lets it reach nothing but that proxy. Nothing is decrypted: the proxy sees the hostname each connection asks for and, for HTTPS, the server name in its TLS handshake, which must match it. [NETWORKING.md](NETWORKING.md) covers what that stops and what it doesn't.
 
 ```bash
 bxn egress mode my-project enforce      # only listed hosts (restarts it the first time)
@@ -766,7 +783,11 @@ bxn egress baseline my-project off      # only its plugin hosts and its own (on 
 bxn egress mode my-project report       # allow all public web traffic, log what enforce would block
 bxn egress mode my-project off          # no allowlist
 bxn egress ls [my-project]              # modes, proxies, and where each host comes from
-bxn egress refresh [my-project|--all]   # finish an interrupted change, review a baseline update
+bxn egress refresh [my-project|--all]   # finish an interrupted change, review a baseline update, update the proxy
+bxn egress upload-limit my-project      # how much it may send a host in an hour before bxn warns
+bxn egress upload-limit my-project github.com 5G   # raise one for this container
+bxn egress upload-cap my-project on     # under enforce, cut an upload past its limit (off: warn only)
+bxn egress log my-project --uploads     # bytes sent to each host, largest first
 ```
 
 - **Hosts** are hostnames for ports 80 and 443. A leading `*.` matches any subdomain, not the name itself.
@@ -777,9 +798,12 @@ bxn egress refresh [my-project|--all]   # finish an interrupted change, review a
 - **Proxy settings** (`HTTP_PROXY`, `HTTPS_PROXY`, a narrow `NO_PROXY` that also covers Docker's networks, `npm_config_proxy`/`npm_config_https_proxy` for npm, pnpm, yarn and the install scripts they run, `NODE_USE_ENV_PROXY=1`, `ELECTRON_GET_USE_PROXY=1`) go into the Incus environment, `/etc/environment`, every systemd service, and apt. Tools that keep proxy settings in their own files get them from their plugin (`plugin_proxy`; Docker's client config, so builds and containers inside Docker use the proxy). Under `enforce`, a tool that ignores all of these fails with a DNS error rather than getting around the proxy; the note in the agents' instructions says how to point such a tool at the proxy. Node's built-in `fetch` needs Node 22.21 or 24 or later for this.
 - **Without DNS**: an allowlisted container can't look names up itself; the proxy does it.
 - **In the status view** (`bxn`), allowlisted containers show 🔒 (enforce) or 🔓 (report), and their details have **Network** and **Rules** tabs (h/l). Network lists what the container tried to reach, blocked first: `a` allows the selected host for that container, `A` for every container, each after a y/n naming the exact host and scope. Rules lists its hosts and where each comes from; `d` removes one of the container's own. `m` changes the mode. A row shows "allowing…" or "removing…" while its change runs, and both tabs update as soon as it finishes. A host logged as blocked that is now listed reads "allowed now", and one logged as allowed that has been removed reads "blocked now" ("unlisted now" under report).
+- **Tunnels used for another name** (a connection opened for an allowed host whose TLS handshake names a different one) are closed under `enforce` and let through under `report`, and logged either way. `bxn egress log` lists them first, under WARNINGS; `bxn egress ls` and the Network tab flag them too. See [Tunnels used for another name](NETWORKING.md#tunnels-used-for-another-name).
+- **Large uploads** to one host (by default over 250M in an hour, or 2G for agents' APIs, code hosts and registries) are logged; the names under one wildcard share a count (a name with its own limit keeps its own), so spreading an upload over them doesn't multiply the limit. `bxn egress log` lists them under WARNINGS, with how to raise that host's limit; `bxn egress ls` and the Network tab flag them too. With `bxn egress upload-cap <container> on` under `enforce`, the upload is cut instead. Limits come from [`egress/upload-limits.txt`](egress/upload-limits.txt), then `~/.config/boxen/egress-upload-limits.txt`, then the container's own. This is an alarm for bulk uploads, such as a whole repository, not a guard against leaks: a small secret passes. See [Upload warnings](NETWORKING.md#upload-warnings).
+- **Proxy updates**: when an update to bxn changes the proxy, `bxn egress refresh --all` rebuilds it in each egress container and moves every container to it, keeping open connections. `bxn egress ls` and `bxn doctor` say when one is out of date.
 - **Separate egress containers** (`--egress-container <name>` on `bxn egress mode`, making `boxen-egress-<name>`) keep groups of containers, such as different clients' work, from reaching each other's proxies. Each egress container is one security boundary.
 
-What an allowlist doesn't stop: data sent to an allowed host (a gist, a package upload), and anything reachable through an allowed shared front end such as a CDN. Hosts in the baseline that accept uploads from anyone with an account are marked `upload:` in the file.
+What an allowlist doesn't stop: data sent to an allowed host (a gist, a package upload), and some of what is reachable through an allowed shared front end such as a CDN. Hosts in the baseline that accept uploads from anyone with an account are marked `upload:` in the file. [NETWORKING.md](NETWORKING.md#what-remains) has the details.
 
 ## When a Create Fails: bxn doctor
 
@@ -788,7 +812,7 @@ What an allowlist doesn't stop: data sent to an allowed host (a gist, a package 
 - **Incus**: the server answers, and has the version, nftables firewall and per-container network rules that isolation needs.
 - **The lock** bxn commands share: one with no owner, or whose process ID now belongs to something else (after a reboot, say), makes every command wait 15 minutes and fail.
 - **boxenbr0**: a /16 that no route or other network overlaps (a VPN often does), the host's interface, IPv4 forwarding, the DHCP server, ufw rules, two containers on one address, and containers a failed create left unlabelled.
-- **Egress**: each egress container is running, starts at boot and answers; each allowlisted container has a listening proxy and no unfinished lockdown; proxies and network rule sets left for containers that are gone.
+- **Egress**: each egress container is running, starts at boot, answers and runs the current proxy build; each allowlisted container has a listening proxy and no unfinished lockdown; proxies and network rule sets left for containers that are gone.
 - **Plugins**: the configured [plugin source](#plugins-from-a-repository), if any, is a directory or a fetched repository with plugins in it; one not fetched yet is a warning, since the first create has to reach it.
 
 The host checks (interface, forwarding, DHCP) run only when the Incus server is on the same machine. Checks that need root, such as the firewall rules themselves, aren't in it yet.

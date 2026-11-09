@@ -12,8 +12,10 @@
 #   setup <resolver> <deny-ranges>   install the shared units; ranges are a
 #                                    comma list
 #   add <agent> <port>               the agent's socket, holder and unit templates
-#   gen <agent> <mode> <policy-id>   write a new generation from hosts on stdin;
-#                                    prints its number
+#   gen <agent> <mode> <policy-id>   write a new generation from hosts on stdin,
+#                                    and the upload watch's lines "upload-cap
+#                                    on|off" and "upload-limit <host>|default
+#                                    <bytes>|off"; prints its number
 #   check <agent> <gen>              probe a check copy of it on a private port
 #   widen <agent> <gen> [--force]    start it; older generations drain
 #   tighten <agent> <gen>            start it; older generations end now
@@ -24,7 +26,11 @@
 #                                    change should have ended still runs,
 #                                    whatever current is)
 #   hosts <agent>                    the hosts the current generation allows
-#   log <agent> [<since>]            decisions as TSV: time host port decision reason gen
+#   log <agent> [<since>]            decisions as TSV: time host port decision reason gen;
+#                                    decision name-mismatch is the TLS name check's,
+#                                    large-upload and upload-cut the upload watch's
+#   uploads <agent> [<since>]        bytes sent per host, from closed tunnels, as
+#                                    TSV: host bytes tunnels, largest first
 #   boot                             at boot: start each agent's current generation
 set -euo pipefail
 
@@ -241,16 +247,27 @@ EOF
 }
 
 cmd_gen() {
-  local agent="$1" mode="$2" policy="$3" n d action host hosts=() deny r
+  local agent="$1" mode="$2" policy="$3" n d action host hosts=() deny r w key val extra cap=off limits=""
   valid_agent "$agent"
   [[ -d "$(agent_dir "$agent")/gens" ]] || die "unknown agent: $agent"
   [[ "$policy" =~ ^[0-9a-f]{8,64}$ ]] || die "bad policy id: $policy"
   case "$mode" in enforce | report) action="$mode" ;; off) action=open ;; *) die "bad mode: $mode" ;; esac
   while IFS= read -r host; do
-    [[ -z "$host" ]] && continue
-    valid_host "$host" || die "bad hostname: $host"
-    names_probe "$host" && die "$host is reserved for the proxy's own check; leave it out"
-    hosts+=("$host")
+    case "$host" in
+      "") continue ;;
+      "upload-cap "*)
+        cap="${host#upload-cap }"
+        [[ "$cap" == on || "$cap" == off ]] || die "bad upload cap: $cap" ;;
+      "upload-limit "*)
+        read -r w key val extra <<< "$host"
+        { [[ "$key" == default ]] || valid_host "$key"; } &&
+          [[ -z "$extra" && ( "$val" == off || "$val" =~ ^[1-9][0-9]{0,17}$ ) ]] || die "bad upload limit: $host"
+        limits+="$key $val"$'\n' ;;
+      *)
+        valid_host "$host" || die "bad hostname: $host"
+        names_probe "$host" && die "$host is reserved for the proxy's own check; leave it out"
+        hosts+=("$host") ;;
+    esac
   done
   n="$(ls "$(agent_dir "$agent")/gens" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)"
   n=$(( ${n:-0} + 1 ))
@@ -282,6 +299,11 @@ cmd_gen() {
   } > "$d/config.yaml"
   echo "$mode" > "$d/mode"
   echo "$policy" > "$d/policy"
+  # The upload watch's limits and cap (egress/boxen-smokescreen/uploads.go).
+  if [[ -n "$limits" ]]; then
+    printf '%s' "$limits" > "$d/upload-limits"
+    echo "$cap" > "$d/upload-cap"
+  fi
   chmod 644 "$d"/*
   # Keep the last few generations that aren't running, for the logs.
   local g
@@ -503,9 +525,15 @@ cmd_hosts() {
     "$(gen_dir "$1" "$cur")/acl.yaml"
 }
 
-# The decision records, without the probe's. jq picks fields by name, so a
-# hostile hostname can't forge a column, and control characters in it are
-# replaced so it can't reach a terminal as an escape code.
+# The decision records, without the probe's, the TLS name check's records
+# (egress/boxen-smokescreen) as decision name-mismatch, and the upload watch's
+# as large-upload (logged, let through) or upload-cut (the cap closed it). An
+# upload watch row says which count went over when it isn't the host's own
+# (a wildcard's, or the overflow), and which limit entry applied when it isn't
+# the host's.
+# jq picks fields by name, so a hostile hostname can't forge a column, and
+# control characters in it are replaced so it can't reach a terminal as an
+# escape code.
 cmd_log() {
   local agent="$1" since="${2:--1h}" born
   valid_agent "$agent"
@@ -514,22 +542,81 @@ cmd_log() {
   [[ "$born" =~ ^[0-9]+$ ]] || born=0
   journalctl -u "boxen-gen_$agent@*.service" --since "$since" -o json --no-pager 2>/dev/null |
     jq -r --arg probe "$PROBE_HOST" --argjson born "$born" '
+      def clean($n): . // "" | tostring | .[0:$n] | gsub("[[:cntrl:]]"; "?");
+      def size: if type != "number" then "?"
+        elif . >= 1073741824 then "\(. / 1073741824 * 10 | floor / 10)G"
+        elif . >= 1048576 then "\(. / 1048576 * 10 | floor / 10)M"
+        elif . >= 1024 then "\(. / 1024 | floor)K" else "\(.)B" end;
       select((.__REALTIME_TIMESTAMP // "0" | tonumber) >= $born)
       | (._SYSTEMD_UNIT | capture("@(?<g>[0-9]+)\\.service$").g // "-") as $gen
-      | (.MESSAGE | strings | select(contains("CANONICAL-PROXY-DECISION"))
+      | (.MESSAGE | strings
+         | select(contains("CANONICAL-PROXY-DECISION") or contains("BOXEN-TLS-NAME-CHECK")
+                  or contains("BOXEN-UPLOAD-LIMIT"))
          | (try fromjson catch null)) as $m
       | select($m != null)
-      | ($m.requested_host // "" | tostring | .[0:300] | gsub("[[:cntrl:]]"; "?")) as $hp
-      | select(($hp | split(":")[0]) != $probe)
-      | [ ($m.time // "-"),
-          ($hp | sub(":[0-9]+$"; "")),
-          ($hp | capture(":(?<p>[0-9]+)$").p // "-"),
-          (if $m.allow == false then "blocked"
-           elif $m.enforce_would_deny == true then "would-block"
-           else "allowed" end),
-          ($m.decision_reason // "-" | tostring | .[0:200] | gsub("[[:cntrl:]]"; "?")),
-          $gen ]
+      | if $m.msg == "BOXEN-TLS-NAME-CHECK" then
+          ($m.connect_host | clean(300)) as $h
+          | select($h != $probe)
+          | [ ($m.time // "-"), $h,
+              ($m.connect_port | clean(5) | if test("^[0-9]+$") then . else "-" end),
+              "name-mismatch",
+              ((if $m.reason == "mismatch" then "TLS name was " + ($m.tls_name | clean(253))
+                elif $m.reason == "no_name" then "TLS handshake named no host"
+                elif $m.reason == "not_tls" then "not TLS"
+                else "malformed TLS handshake" end)
+               + (if $m.enforced == true then "; closed" else "; let through (report)" end)),
+              $gen ]
+        elif $m.msg == "BOXEN-UPLOAD-LIMIT" then
+          ($m.connect_host | clean(300)) as $h
+          | ($m.counted_for | clean(300)) as $for
+          | ($m.limit_key | clean(300)) as $key
+          | [ ($m.time // "-"), $h,
+              ($m.connect_port | clean(5) | if test("^[0-9]+$") then . else "-" end),
+              (if $m.cut == true then "upload-cut" else "large-upload" end),
+              (($m.window_bytes | size) + " sent in an hour"
+               + (if $for == "overflow" then " across hosts too many to count one by one"
+                  elif $for != "" and $for != $h then " across " + $for else "" end)
+               + "; limit " + ($m.limit_bytes | size)
+               + (if $key != "" and $key != $h then " (" + $key + ")" else "" end)
+               + (if $m.cut == true then "; cut" else "; let through" end)),
+              $gen ]
+        elif $m.msg == "CANONICAL-PROXY-DECISION" then
+          ($m.requested_host | clean(300)) as $hp
+          | select(($hp | split(":")[0]) != $probe)
+          | [ ($m.time // "-"),
+              ($hp | sub(":[0-9]+$"; "")),
+              ($hp | capture(":(?<p>[0-9]+)$").p // "-"),
+              (if $m.allow == false then "blocked"
+               elif $m.enforce_would_deny == true then "would-block"
+               else "allowed" end),
+              ($m.decision_reason // "-" | tostring | .[0:200] | gsub("[[:cntrl:]]"; "?")),
+              $gen ]
+        # Any other record that merely contains a marker, such as a close
+        # record for a host named after one, is no row.
+        else empty end
       | @tsv'
+}
+
+# Bytes each host was sent, from smokescreen's close record for each CONNECT
+# tunnel: bytes_out counts what the client wrote to the host. A tunnel still
+# open has no record yet. Sanitised as in cmd_log, and like it, only records
+# since the agent was added, not an earlier agent's of the same name.
+cmd_uploads() {
+  local agent="$1" since="${2:--1h}" born
+  valid_agent "$agent"
+  [[ "$since" =~ ^[-+0-9a-zA-Z:\ ]+$ ]] || die "bad --since: $since"
+  born="$(cat "$(agent_dir "$agent")/born" 2>/dev/null || true)"
+  [[ "$born" =~ ^[0-9]+$ ]] || born=0
+  journalctl -u "boxen-gen_$agent@*.service" --since "$since" -o json --no-pager 2>/dev/null |
+    jq -r --arg probe "$PROBE_HOST" --argjson born "$born" '
+      select((.__REALTIME_TIMESTAMP // "0" | tonumber) >= $born)
+      | (.MESSAGE | strings | select(contains("CANONICAL-PROXY-CN-CLOSE")) | (try fromjson catch null)) as $m
+      | select($m != null and $m.msg == "CANONICAL-PROXY-CN-CLOSE" and ($m.bytes_out | type) == "number")
+      | ($m.requested_host // "" | tostring | .[0:300] | gsub("[[:cntrl:]]"; "?") | sub(":[0-9]+$"; "")) as $h
+      | select($h != $probe)
+      | [$h, $m.bytes_out] | @tsv' |
+    awk -F'\t' '{ b[$1] += $2; n[$1]++ } END { for (h in b) printf "%s\t%.0f\t%d\n", h, b[h], n[h] }' |
+    sort -t$'\t' -k2,2nr
 }
 
 cmd_boot() {
@@ -560,6 +647,7 @@ case "$c" in
   status) cmd_status "$@" ;;
   hosts) [[ $# -eq 1 ]] || die "usage: hosts <agent>"; cmd_hosts "$@" ;;
   log) [[ $# -ge 1 ]] || die "usage: log <agent> [<since>]"; cmd_log "$@" ;;
+  uploads) [[ $# -ge 1 ]] || die "usage: uploads <agent> [<since>]"; cmd_uploads "$@" ;;
   boot) cmd_boot ;;
   *) die "unknown command: $c" ;;
 esac

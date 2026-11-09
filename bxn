@@ -60,12 +60,15 @@ Commands:
   <container>                    Shell into container (default)
   -s, shell [--with-sudo] <container> [cmd]
                                  Shell into container (--with-sudo grants temporary sudo)
-  -c, create <project> [args...] Create a container named HANDLE-AGENT-PROJECT,
-                                 with one agent (or a shell); numbered -1, -2
-                                 when the name is taken (bxn create -h)
+  -c, create <project> [args...] Create a VM (--container for a system
+                                 container) named HANDLE-AGENT-PROJECT, with
+                                 one agent (or a shell); numbered -1, -2 when
+                                 the name is taken (bxn create -h)
   -c, create <project> <github-url>
                                  The same, with a clone of the repository as
                                  its workspace, not a copy of this directory
+  -c, create --template <name>   Build and save a reusable template, launched
+                                 later with bxn -c <project> --from <name>
   handle [<new>]                 Show or change your handle, the first part of
                                  every container name
   -n, net <container> [ports...] Manage port proxies
@@ -76,7 +79,9 @@ Commands:
                                  list them, map tailnet HTTPS <port> to the
                                  app's <target> (default: the same), or remove
   -e, env <container> <VAR>      Set env variable (prompts silently, paste-friendly)
-  rm <container>                 Force delete a container
+  rm [--force] <container>       Delete a container. Without --force it first
+                                 looks for work in its workspace that isn't
+                                 pushed, and asks (off a terminal, refuses)
   -k, kill <container>           Stop a container
   -ka, kill-all                  Stop all boxen containers
   -u, update <container>         Update packages in a container
@@ -93,6 +98,8 @@ Commands:
                                  repository's, or a repository or directory of
                                  your own in their place (bxn plugins -h)
   new-plugin <slug> [opts]       Generate a new plugin file from a template
+  notify-snippet                 Print a shell hook that reports failed nightly
+                                 updates (bxn notify-snippet >> ~/.zshrc)
   -h, help                       Show this help
 
 Cron:
@@ -108,7 +115,9 @@ Examples:
   bxn your-container                        Shell into your-container
   bxn -s your-container                     Shell into your-container (explicit)
   bxn -s your-container mix test            Run a command in your-container
-  bxn -c your-container                     Create your-container
+  bxn -c your-container                     Create your-container (a VM)
+  bxn -c your-container --container         Create your-container as a system container
+  bxn -c --template base-dev                Save a template named base-dev
   bxn -c your-container --from base-dev     Create your-container from template
   bxn create web https://github.com/OWNER/REPO
                                             Create a container for web with that
@@ -120,6 +129,7 @@ Examples:
   bxn -n your-container -l                  List proxies on your-container
   bxn -e your-container OPENAI_API_KEY      Set env var in your-container (prompts silently)
   bxn rm your-container                     Delete your-container
+  bxn rm --force your-container             Delete it without looking for unpushed work
   bxn -k your-container                     Stop your-container
   bxn -ka                       Stop all boxen containers
   bxn -u your-container                     Update packages in your-container
@@ -439,7 +449,7 @@ STATUS_JQ="$STATUS_DEFS"'
   end
 '
 
-# The two-panel view, as tagged lines for status_frame_panels:
+# The two-panel view, as tagged lines for tui_frame_panels:
 #   L  a list row, padded to the panel width before any escape codes go in,
 #      so the shell can put the details beside it by position
 #   S  the index of the selected instance among the L rows
@@ -586,42 +596,59 @@ cmd_status() {
 }
 
 # ---------------------------------------------------------------------------
-# Interactive status: redraws about once a second. j/k or the arrow keys
-# move the highlighted row, space starts or stops it, D deletes it after a
-# y/n, q quits. Start, stop and delete run in the background so the view
-# keeps refreshing; each job writes its exit code to <log>.rc when it
-# finishes.
+# Full-screen views. tui_run <screen> takes over the terminal (alternate
+# screen, no echo, no line wrapping) and loops about once a second: report
+# the jobs that finished, fetch, draw, read a key, act on it. A screen is a
+# set of functions named after it:
 #
-# A terminal at least STATUS_WIDE_COLS wide shows the instances on the left
-# and the selected one's details on the right; tab moves the keys between
-# them. A narrower one shows the table, and enter opens the details full
-# screen until esc.
+#   <screen>_fetch           Read what the view shows. Runs every second,
+#                            and as soon as a job finishes.
+#   <screen>_draw            Add the view's rows to frame, and set keys to
+#                            the key help shown under them.
+#   <screen>_key <key>       Act on a key. Set leave=true to leave the view.
+#   <screen>_answer <key>    Act on the answer to the question in ask.
+#   <screen>_job_done <verb> <name> <log> <rc>
+#                            Report a job that tui_job started; <log> holds
+#                            what it printed.
+#
+# They read and set tui_run's locals (frame, keys, msg, msg_lines,
+# term_rows, term_cols, leave, ask, ask_desc, ask_args, ask_fit, pending,
+# jobs, log_file, fetch), and the screen's own state is the locals of the
+# function that calls tui_run: Bash scopes locals dynamically.
+#
+# A key arrives as one character, with the arrow keys as k/j/l/h, enter as
+# "enter", a lone escape as "esc", and nothing when a second passes without
+# one. To ask a question, a screen sets ask (its name for the question),
+# ask_desc (the text, which replaces the key help) and ask_fit. The next key
+# answers it. Lines don't wrap, so a question wider than the terminal is
+# clipped; when ask_fit is set, such a question is withdrawn instead, with
+# ask_fit as the message, so nothing is approved that the user couldn't see
+# in full. tui_fits checks again when the answer comes.
 # ---------------------------------------------------------------------------
-STATUS_TTY_SAVED=""
-STATUS_TMP=""
-STATUS_WIDE_COLS=100
+TUI_TTY_SAVED=""
+TUI_TMP=""
 
-status_tui_restore() {
+tui_restore() {
   printf '\033[?7h\033[?25h\033[?1049l'
-  if [[ -n "$STATUS_TTY_SAVED" ]]; then stty "$STATUS_TTY_SAVED" 2>/dev/null || true; fi
-  if [[ -n "$STATUS_TMP" ]]; then rm -rf "$STATUS_TMP"; fi
+  if [[ -n "$TUI_TTY_SAVED" ]]; then stty "$TUI_TTY_SAVED" 2>/dev/null || true; fi
+  if [[ -n "$TUI_TMP" ]]; then rm -rf "$TUI_TMP"; fi
 }
 
-# Usage: msg=$(status_note "$msg" <line>). Keeps the last three lines so
+# Usage: msg=$(tui_note "$msg" <line>). Keeps the last three lines so
 # results from jobs that finish close together all stay visible.
-status_note() {
+tui_note() {
   printf '%s\n%s\n' "$1" "$2" | sed '/^$/d' | tail -n 3
 }
 
-# The status_frame_* helpers add rows to status_interactive's frame and move
-# its scroll offsets, top (list) and rtop (details), reading its term_rows,
-# msg_lines and sel.
+# The tui_frame_* helpers add rows to frame, reading tui_run's term_rows and
+# msg_lines and the screen's sel (the highlighted row), and move the
+# screen's scroll offsets, top (list) and rtop (details).
 
 # Fits the table to the terminal. The header row stays at the top and the
-# footer at the bottom; the instance rows between them scroll to keep the
+# footer at the bottom; the rows between them scroll to keep the
 # highlighted row visible.
-# Usage: status_frame_table <table>
-status_frame_table() {
+# Usage: tui_frame_table <table>
+tui_frame_table() {
   local lines=() line n head=0 tail=0 body_len avail sel_line=-1 i
   while IFS= read -r line; do
     if [[ "$line" == $'\033[7m'* ]]; then sel_line=${#lines[@]}; fi
@@ -647,11 +674,12 @@ status_frame_table() {
   for ((i = n - tail; i < n; i++)); do frame+=("${lines[$i]}"); done
 }
 
-# Lays out status_render_panels output: the list and the details side by
-# side when wide is true, otherwise the details alone. The list's header row
-# and the details' title and tab rows stay put; the rows under them scroll.
-# Usage: status_frame_panels <tagged lines> <wide>
-status_frame_panels() {
+# Lays out tagged lines (L list, R details, F footer, S the list row that
+# is highlighted): the list and the details side by side when wide is true,
+# otherwise the details alone. The list's header row and the details' title
+# and tab rows stay put; the rows under them scroll.
+# Usage: tui_frame_panels <tagged lines> <wide>
+tui_frame_panels() {
   local tagged="$1" wide="$2" line lefts=() rights=() foots=() sel_at=-1
   local height list_rows info_rows blank="" i j l r
   while IFS= read -r line; do
@@ -694,6 +722,158 @@ status_frame_panels() {
   if ((${#foots[@]} > 0)); then frame+=("${foots[@]}"); fi
 }
 
+# Runs <command> in the background, so the view keeps refreshing; it writes
+# its exit code to <log>.rc when it finishes, and the loop then hands it to
+# <screen>_job_done. Sets log_file to <log>.
+# Usage: tui_job <verb> <name> <command...>
+tui_job() {
+  local verb="$1" name="$2"
+  shift 2
+  jobs=$((jobs + 1))
+  log_file="$TUI_TMP/$jobs"
+  (
+    trap - EXIT INT TERM
+    rc=0
+    "$@" </dev/null >"$log_file" 2>&1 || rc=$?
+    echo "$rc" >"$log_file.tmp"
+    mv "$log_file.tmp" "$log_file.rc"
+  ) &
+  pending+="$verb"$'\t'"$name"$'\t'"$log_file"$'\n'
+}
+
+# Reports the jobs that have finished, and fetches again after any.
+tui_reap() {
+  local still="" p_verb p_name p_log
+  [[ -n "$pending" ]] || return 0
+  while IFS=$'\t' read -r p_verb p_name p_log; do
+    [[ -n "$p_verb" ]] || continue
+    if [[ ! -f "$p_log.rc" ]]; then
+      still+="$p_verb"$'\t'"$p_name"$'\t'"$p_log"$'\n'
+      continue
+    fi
+    "${screen}_job_done" "$p_verb" "$p_name" "$p_log" "$(cat "$p_log.rc")"
+    fetch=true
+  done <<<"$pending"
+  pending=$still
+}
+
+tui_measure() {
+  local size
+  size=$(stty size 2>/dev/null) || size=""
+  term_rows=${size%% *}
+  term_cols=${size##* }
+  if ! [[ "$term_rows" =~ ^[0-9]+$ ]] || ((term_rows < 1)); then term_rows=24; fi
+  if ! [[ "$term_cols" =~ ^[0-9]+$ ]]; then term_cols=0; fi
+}
+
+# True when the question in ask_desc fits on one line of the terminal. The
+# terminal can shrink while the loop waits for the answer, so a screen
+# checks again before acting on a yes.
+tui_fits() {
+  local size cols
+  size=$(stty size 2>/dev/null) || size=""
+  cols=${size##* }
+  [[ "$cols" =~ ^[0-9]+$ ]] && ((${#ask_desc} < cols))
+}
+
+tui_read_key() {
+  local rc=0 rest=""
+  key=""
+  IFS= read -rsn1 -t 1 key || rc=$?
+  # Enter reads as an empty key that succeeded; a timeout fails.
+  if ((rc == 0)) && [[ -z "$key" ]]; then key=enter; fi
+  if [[ "$key" == $'\033' ]]; then
+    IFS= read -rsn2 -t 1 rest || true
+    case "$rest" in
+      "[A" | OA) key=k ;;
+      "[B" | OB) key=j ;;
+      "[C" | OC) key=l ;;
+      "[D" | OD) key=h ;;
+      "") key=esc ;;
+      *) key="" ;;
+    esac
+  fi
+}
+
+# Draws frame, then the key help (or the question) and any messages.
+tui_paint() {
+  local out line i
+  # A question replaces the key help, in any layout.
+  if [[ -n "$ask" ]]; then keys="$ask_desc"; fi
+  frame+=("" "$keys")
+  if [[ -n "$msg" ]]; then
+    while IFS= read -r line; do frame+=("$line"); done <<<"$msg"
+  fi
+  # No newline after the last row, or a full-height frame would scroll.
+  out=$'\033[H'
+  for ((i = 0; i < ${#frame[@]}; i++)); do
+    if ((i > 0)); then out+=$'\n'; fi
+    out+="${frame[$i]}"$'\033[K'
+  done
+  out+=$'\033[J'
+  printf '%s' "$out"
+}
+
+# Usage: tui_run <screen>
+tui_run() {
+  local screen="$1"
+  local frame=() keys="" msg="" msg_lines=0 term_rows=24 term_cols=0 key="" leave=false
+  local pending="" jobs=0 log_file="" fetch=true last=-1
+  local ask="" ask_desc="" ask_args=() ask_fit=""
+
+  TUI_TMP=$(mktemp -d)
+  TUI_TTY_SAVED=$(stty -g)
+  trap tui_restore EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  stty -echo
+  # Alternate screen, hidden cursor, and no line wrapping: a long line is
+  # clipped at the right edge instead of pushing the frame down a row.
+  printf '\033[?1049h\033[?25l\033[?7l'
+
+  while :; do
+    tui_reap
+    if [[ $fetch == true || $SECONDS -ne $last ]]; then
+      "${screen}_fetch"
+      last=$SECONDS
+      fetch=false
+    fi
+    tui_measure
+    # Checked every frame, so shrinking the terminal withdraws it too.
+    if [[ -n "$ask" && -n "$ask_fit" ]] && ((${#ask_desc} >= term_cols)); then
+      ask=""
+      msg=$(tui_note "$msg" "$ask_fit")
+    fi
+    msg_lines=0
+    if [[ -n "$msg" ]]; then msg_lines=$(printf '%s\n' "$msg" | wc -l); fi
+    frame=()
+    keys=""
+    "${screen}_draw"
+    tui_paint
+    tui_read_key
+    if [[ -n "$ask" && -n "$key" ]]; then
+      "${screen}_answer" "$key"
+      ask=""
+      continue
+    fi
+    "${screen}_key" "$key"
+    [[ $leave == false ]] || break
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Interactive status, a tui_run screen: redraws about once a second. j/k or
+# the arrow keys move the highlighted row, space starts or stops it, D
+# deletes it after a y/n, q quits. Start, stop, delete and egress changes
+# run as tui_jobs.
+#
+# A terminal at least STATUS_WIDE_COLS wide shows the instances on the left
+# and the selected one's details on the right; tab moves the keys between
+# them. A narrower one shows the table, and enter opens the details full
+# screen until esc.
+# ---------------------------------------------------------------------------
+STATUS_WIDE_COLS=100
+
 # Rows for the Network and Rules tabs, as "key<TAB>shown text": the key is
 # the host an action applies to. Hostnames come from proxy logs and are
 # treated as hostile: control characters are already replaced by the egress
@@ -706,7 +886,10 @@ status_frame_panels() {
 # and nothing is relabelled when that list can't be read. Only a block the list
 # made ("default rule policy used") can become "allowed now": one for a
 # private address stays blocked whatever is listed. A leading "*." matches
-# subdomains only, as in the proxy.
+# subdomains only, as in the proxy. A connection the TLS name check caught
+# (name-mismatch: used for another name than the allowed host it asked for)
+# and a host sent more than its upload limit in an hour (large-upload, or
+# upload-cut when the cap cut it) come before everything else.
 # Usage: status_tab_rows <name> network|rules [<mode>]
 status_tab_rows() {
   if [[ "$2" == network ]]; then
@@ -724,32 +907,16 @@ status_tab_rows() {
                              if ((d == "blocked" || d == "would-block") && !(k in other) && covered(f[1])) d = "allowed now"
                              else if (d == "allowed" && !covered(f[1])) d = (mode == "report") ? "unlisted now" : "blocked now"
                            }
-                           r = (d ~ /^blocked/) ? 0 : (d ~ /^(would-block|unlisted)/) ? 1 : 2
+                           r = (d == "name-mismatch" || d == "large-upload" || d == "upload-cut") ? 0 : (d ~ /^blocked/) ? 1 : (d ~ /^(would-block|unlisted)/) ? 2 : 3
                            h = f[1]; if (length(h) > 60) h = substr(h, 1, 57) "..."
-                           print r "\t" n[k] "\t" f[1] "\t" sprintf("%-12s %5d  %-8s  %s:%s", d, n[k], last[k], h, f[2]) } }' \
+                           # The same columns as "%-12s %5d", with room for name-mismatch.
+                           c = (length(d) < 13) ? d " " : d
+                           print r "\t" n[k] "\t" f[1] "\t" sprintf("%-13s%5d  %-8s  %s:%s", c, n[k], last[k], h, f[2]) } }' \
       <("$SCRIPT_DIR/bxn.egress" ls "$1" --tsv --applied 2>/dev/null | cut -f1) - |
       sort -t$'\t' -k1,1n -k2,2nr | cut -f3-
   else
     "$SCRIPT_DIR/bxn.egress" ls "$1" --tsv 2>/dev/null | awk -F'\t' '{ gsub(/[[:cntrl:]]/, "?", $1); gsub(/[[:cntrl:]]/, "?", $2); printf "%s\t%-44s %s\n", $1, substr($1, 1, 44), $2 }'
   fi
-}
-
-# Runs a start, stop or delete in the background; the loop reports it when
-# <log>.rc appears.
-# Usage: status_job <verb> <name> <command...>
-status_job() {
-  local verb="$1" name="$2"
-  shift 2
-  jobs=$((jobs + 1))
-  log_file="$STATUS_TMP/$jobs"
-  (
-    trap - EXIT INT TERM
-    rc=0
-    "$@" </dev/null >"$log_file" 2>&1 || rc=$?
-    echo "$rc" >"$log_file.tmp"
-    mv "$log_file.tmp" "$log_file.rc"
-  ) &
-  pending+="$verb"$'\t'"$name"$'\t'"$log_file"$'\n'
 }
 
 # True when a job other than a graceful stop is pending for <name>.
@@ -761,22 +928,15 @@ status_busy_except_stop() {
   return 1
 }
 
-# Starts an egress change as a background job, like start and stop.
+# Starts an egress change as a background job, like start and stop, for the
+# instance in name.
 # Usage: status_egress_job <description> <bxn egress args...>
 status_egress_job() {
   local desc="$1"
   shift
-  jobs=$((jobs + 1))
-  log_file="$STATUS_TMP/$jobs"
+  tui_job egress "$name" "$SCRIPT_DIR/bxn.egress" "$@"
+  # Read by status_job_done, which runs in this shell, after this returns.
   printf '%s\n' "$desc" >"$log_file.desc"
-  (
-    trap - EXIT INT TERM
-    rc=0
-    "$SCRIPT_DIR/bxn.egress" "$@" </dev/null >"$log_file" 2>&1 || rc=$?
-    echo "$rc" >"$log_file.tmp"
-    mv "$log_file.tmp" "$log_file.rc"
-  ) &
-  pending+="egress"$'\t'"$name"$'\t'"$log_file"$'\n'
   # The row it changes is marked until it finishes: <log> <container, or *
   # for every one> <host> <what's happening>.
   case "$1:${2:-}" in
@@ -784,419 +944,333 @@ status_egress_job() {
     allow:*) busy+="$log_file"$'\t'"$2"$'\t'"${3:-}"$'\tallowing\n' ;;
     rm:*) busy+="$log_file"$'\t'"$2"$'\t'"${3:-}"$'\tremoving\n' ;;
   esac
-  msg=$(status_note "$msg" "$desc…")
+  msg=$(tui_note "$msg" "$desc…")
 }
 
 status_interactive() {
-  local color=true host json="[]" listed sample='{"t":0,"cpu":{}}' prev at=null
-  local names=() states=() count=0 sel=0 sel_name="" hl i
-  local pending="" still msg="" fetch=true last=-1 jobs=0
-  local key rc rest line out table tagged keys name state verb log_file p_verb p_name p_log err why
-  local busy="" modes=() md
-  local egs=() trans=() mgds=() roles=() eg tr mgd role tab=info tabs_n=1 rsel=0 tab_rows=() tab_for="" tab_at=0 ask="" ask_args=() ask_desc="" r
-  local frame=() size term_rows term_cols msg_lines wide focus=list top=0 rtop=0
+  local color=true host="" json="[]" sample='{"t":0,"cpu":{}}' prev='{"t":0,"cpu":{}}' at=null
+  local names=() states=() count=0 sel=0 sel_name=""
+  local busy="" modes=() egs=() trans=() mgds=() roles=()
+  local tab=info tabs_n=1 rsel=0 tab_rows=() tab_for="" tab_at=0
+  local wide=false focus=list top=0 rtop=0
   if [[ -n "${NO_COLOR:-}" ]]; then color=false; fi
+  tui_run status
+}
 
-  STATUS_TMP=$(mktemp -d)
-  STATUS_TTY_SAVED=$(stty -g)
-  trap status_tui_restore EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  stty -echo
-  # Alternate screen, hidden cursor, and no line wrapping: a long line is
-  # clipped at the right edge instead of pushing the frame down a row.
-  printf '\033[?1049h\033[?25l\033[?7l'
-  host=$(status_host)
-  prev=$sample
+status_job_done() {
+  local verb="$1" name="$2" log="$3" rc="$4" line err
+  if [[ "$verb" == egress ]]; then
+    # The last line says what happened (bxn egress logs one per change).
+    # sed alone, so an empty log can't fail the pipeline (pipefail).
+    err=$(sed -e $'s/\033\\[[0-9;]*m//g' -e '/^$/d' "$log" | tail -n 1 | tr -d '[:cntrl:]')
+    if [[ "$rc" == 0 ]]; then line="${err#\[+\] }"; else line="Failed: $(head -n 1 "$log.desc"): ${err#\[ERROR\] }"; fi
+    msg=$(tui_note "$msg" "$line")
+    # The list changed (or didn't): read the open tab again now, not
+    # when its five seconds are up.
+    busy=$(printf '%s' "$busy" | awk -F'\t' -v l="$log" '$1 != l')
+    [[ -z "$busy" ]] || busy+=$'\n'
+    tab_at=-100
+  elif [[ "$rc" == 0 ]]; then
+    case "$verb" in stop|force-stop) line="Stopped $name" ;; delete) line="Deleted $name" ;; *) line="Started $name" ;; esac
+    msg=$(tui_note "$msg" "$line")
+  else
+    err=$(sed -e $'s/\033\\[[0-9;]*m//g' -e '/^$/d' "$log" | grep -m 1 -i 'error' || head -n 1 "$log")
+    err=${err#\[ERROR\] }
+    msg=$(tui_note "$msg" "Failed to $verb $name: ${err#Error: }")
+  fi
+}
 
-  while :; do
-    # Report start/stop jobs that have finished.
-    if [[ -n "$pending" ]]; then
-      still=""
-      while IFS=$'\t' read -r p_verb p_name p_log; do
-        [[ -n "$p_verb" ]] || continue
-        if [[ ! -f "$p_log.rc" ]]; then
-          still+="$p_verb"$'\t'"$p_name"$'\t'"$p_log"$'\n'
-          continue
-        fi
-        if [[ "$p_verb" == egress ]]; then
-          # The last line says what happened (bxn egress logs one per change).
-          # sed alone, so an empty log can't fail the pipeline (pipefail).
-          err=$(sed -e $'s/\033\\[[0-9;]*m//g' -e '/^$/d' "$p_log" | tail -n 1 | tr -d '[:cntrl:]')
-          if [[ "$(cat "$p_log.rc")" == 0 ]]; then line="${err#\[+\] }"; else line="Failed: $(head -n 1 "$p_log.desc"): ${err#\[ERROR\] }"; fi
-          msg=$(status_note "$msg" "$line")
-          # The list changed (or didn't): read the open tab again now, not
-          # when its five seconds are up.
-          busy=$(printf '%s' "$busy" | awk -F'\t' -v l="$p_log" '$1 != l')
-          [[ -z "$busy" ]] || busy+=$'\n'
-          tab_at=-100
-        elif [[ "$(cat "$p_log.rc")" == 0 ]]; then
-          case "$p_verb" in stop|force-stop) line="Stopped $p_name" ;; delete) line="Deleted $p_name" ;; *) line="Started $p_name" ;; esac
-          msg=$(status_note "$msg" "$line")
-        else
-          err=$(sed -e $'s/\033\\[[0-9;]*m//g' -e '/^$/d' "$p_log" | grep -m 1 -i 'error' || head -n 1 "$p_log")
-          err=${err#\[ERROR\] }
-          msg=$(status_note "$msg" "Failed to $p_verb $p_name: ${err#Error: }")
-        fi
-        fetch=true
-      done <<<"$pending"
-      pending=$still
-    fi
+status_fetch() {
+  local listed name state eg tr mgd role md i
+  [[ -n "$host" ]] || host=$(status_host)
+  if listed=$(incus list --format json 2>/dev/null); then
+    json=$listed
+    prev=$sample
+    sample=$(jq -c "$STATUS_SAMPLE_JQ" <<<"$json")
+    at=$(jq '.t' <<<"$sample")
+    names=()
+    states=()
+    egs=()
+    trans=()
+    mgds=()
+    roles=()
+    modes=()
+    while IFS=$'\t' read -r name state eg tr mgd role md; do
+      [[ -n "$name" ]] || continue
+      names+=("$name")
+      states+=("$state")
+      egs+=("$eg")
+      trans+=("$tr")
+      mgds+=("$mgd")
+      roles+=("$role")
+      modes+=("$md")
+    done <<<"$(jq -r "$STATUS_ORDER_DEFS"' ordered[] | [.name, .status,
+      (.expanded_config["user.boxen.egress.container"] // "-" | if . == "" then "-" else . end),
+      (.expanded_config["user.boxen.egress.transition"] // "none"),
+      (if managed then "yes" else "no" end),
+      (.expanded_config["user.boxen.role"] // "-" | if . == "" then "-" else . end),
+      (.expanded_config["user.boxen.egress"] // "enforce" | if . == "" then "enforce" else . end)] | @tsv' <<<"$json")"
+    count=${#names[@]}
+    # Keep the highlight on the same instance when the list changes.
+    for ((i = 0; i < count; i++)); do
+      if [[ "${names[$i]}" == "$sel_name" ]]; then sel=$i; fi
+    done
+  else
+    msg=$(tui_note "$msg" "Failed to list instances")
+  fi
+}
 
-    if [[ $fetch == true || $SECONDS -ne $last ]]; then
-      if listed=$(incus list --format json 2>/dev/null); then
-        json=$listed
-        prev=$sample
-        sample=$(jq -c "$STATUS_SAMPLE_JQ" <<<"$json")
-        at=$(jq '.t' <<<"$sample")
-        names=()
-        states=()
-        egs=()
-        trans=()
-        mgds=()
-        roles=()
-        modes=()
-        while IFS=$'\t' read -r name state eg tr mgd role md; do
-          [[ -n "$name" ]] || continue
-          names+=("$name")
-          states+=("$state")
-          egs+=("$eg")
-          trans+=("$tr")
-          mgds+=("$mgd")
-          roles+=("$role")
-          modes+=("$md")
-        done <<<"$(jq -r "$STATUS_ORDER_DEFS"' ordered[] | [.name, .status,
-          (.expanded_config["user.boxen.egress.container"] // "-" | if . == "" then "-" else . end),
-          (.expanded_config["user.boxen.egress.transition"] // "none"),
-          (if managed then "yes" else "no" end),
-          (.expanded_config["user.boxen.role"] // "-" | if . == "" then "-" else . end),
-          (.expanded_config["user.boxen.egress"] // "enforce" | if . == "" then "enforce" else . end)] | @tsv' <<<"$json")"
-        count=${#names[@]}
-        # Keep the highlight on the same instance when the list changes.
-        for ((i = 0; i < count; i++)); do
-          if [[ "${names[$i]}" == "$sel_name" ]]; then sel=$i; fi
-        done
-      else
-        msg=$(status_note "$msg" "Failed to list instances")
-      fi
-      last=$SECONDS
-      fetch=false
-    fi
-    if ((sel >= count)); then sel=$((count - 1)); fi
-    if ((sel < 0)); then sel=0; fi
-    hl=-1
-    if ((count > 0)); then
-      hl=$sel
-      sel_name=${names[$sel]}
-    fi
-
-    # Fit the frame to the terminal: the view, then the key help and any
-    # messages at the bottom.
-    size=$(stty size 2>/dev/null) || size=""
-    term_rows=${size%% *}
-    term_cols=${size##* }
-    if ! [[ "$term_rows" =~ ^[0-9]+$ ]] || ((term_rows < 1)); then term_rows=24; fi
-    if ! [[ "$term_cols" =~ ^[0-9]+$ ]]; then term_cols=0; fi
-    # Wrapping is disabled: never approve a host and scope the user cannot
-    # see in full. Check every frame so shrinking the terminal cancels too.
-    if [[ "$ask" == confirm ]] && ((${#ask_desc} >= term_cols)); then
-      ask=""
-      msg=$(status_note "$msg" "Host and scope do not fit; use bxn egress allow.")
-    fi
-    if [[ "$ask" == delete ]] && ((${#ask_desc} >= term_cols)); then
-      ask=""
-      msg=$(status_note "$msg" "The question does not fit; widen the terminal or use bxn rm.")
-    fi
-    wide=false
-    if ((term_cols >= STATUS_WIDE_COLS)); then wide=true; fi
-    if ((count == 0)); then focus=list; fi
-    msg_lines=0
-    if [[ -n "$msg" ]]; then msg_lines=$(printf '%s\n' "$msg" | wc -l); fi
-    frame=()
-    if [[ $wide == false && $focus == list ]]; then
-      table=$(status_render "$json" "$prev" "$at" "$host" "$color" "$hl") || table="Failed to render status"
-      status_frame_table "$table"
-      # 80 columns: j/k also select, as the help says, but don't fit here.
-      keys="↑/↓ select · enter details · space start/stop · S force stop · D delete · q quit"
-    else
-      tabs_n=1
-      if ((count > 0)) && [[ "${egs[$sel]}" != "-" ]]; then tabs_n=3; fi
-      if ((tabs_n == 1)); then tab=info; fi
-      tagged=$(status_render_panels "$json" "$prev" "$at" "$host" "$color" "$hl" "$focus" "$tab") ||
-        tagged=$'L\tFailed to render status'
-      if [[ "$tab" != info ]]; then
-        # Read only while the tab is open, at most every five seconds.
-        if [[ "$tab_for" != "$sel_name/$tab" ]] || ((SECONDS - tab_at >= 5)); then
-          # A change can reorder the rows: keep the cursor on its host.
-          r=""
-          if [[ "$tab_for" == "$sel_name/$tab" ]] && ((rsel < ${#tab_rows[@]})); then r=${tab_rows[$rsel]%%$'\t'*}; fi
-          tab_rows=()
-          while IFS= read -r line; do [[ -n "$line" ]] && tab_rows+=("$line"); done <<<"$(status_tab_rows "$sel_name" "$tab" "${modes[$sel]:-enforce}")"
-          if [[ "$tab_for" != "$sel_name/$tab" ]]; then
-            rsel=0
-          elif [[ -n "$r" ]]; then
-            for ((i = 0; i < ${#tab_rows[@]}; i++)); do
-              if [[ "${tab_rows[$i]%%$'\t'*}" == "$r" ]]; then rsel=$i; break; fi
-            done
-          fi
-          tab_for="$sel_name/$tab"
-          tab_at=$SECONDS
-        fi
-        if ((rsel >= ${#tab_rows[@]})); then rsel=$((${#tab_rows[@]} - 1)); fi
-        if ((rsel < 0)); then rsel=0; fi
-        if ((${#tab_rows[@]} == 0)); then
-          if [[ "$tab" == network ]]; then tagged+=$'\nR\tNothing logged in the last hour.'; else tagged+=$'\nR\tNo hosts.'; fi
-        else
-          if [[ "$tab" == network ]]; then
-            tagged+=$'\nR\tDECISION      HITS  LAST      HOST'
-          else
-            tagged+=$'\nR\tHOST                                         FROM'
-          fi
-          # Keep the cursor in view: the title, tab and header rows stay put.
-          if ((rsel < rtop)); then rtop=$rsel; fi
-          if ((rsel - rtop > term_rows - 10)); then rtop=$((rsel - term_rows + 10)); fi
+status_draw() {
+  local hl=-1 table tagged line r i
+  if ((sel >= count)); then sel=$((count - 1)); fi
+  if ((sel < 0)); then sel=0; fi
+  if ((count > 0)); then
+    hl=$sel
+    sel_name=${names[$sel]}
+  fi
+  wide=false
+  if ((term_cols >= STATUS_WIDE_COLS)); then wide=true; fi
+  if ((count == 0)); then focus=list; fi
+  if [[ $wide == false && $focus == list ]]; then
+    table=$(status_render "$json" "$prev" "$at" "$host" "$color" "$hl") || table="Failed to render status"
+    tui_frame_table "$table"
+    # 80 columns: j/k also select, as the help says, but don't fit here.
+    keys="↑/↓ select · enter details · space start/stop · S force stop · D delete · q quit"
+  else
+    tabs_n=1
+    if ((count > 0)) && [[ "${egs[$sel]}" != "-" ]]; then tabs_n=3; fi
+    if ((tabs_n == 1)); then tab=info; fi
+    tagged=$(status_render_panels "$json" "$prev" "$at" "$host" "$color" "$hl" "$focus" "$tab") ||
+      tagged=$'L\tFailed to render status'
+    if [[ "$tab" != info ]]; then
+      # Read only while the tab is open, at most every five seconds.
+      if [[ "$tab_for" != "$sel_name/$tab" ]] || ((SECONDS - tab_at >= 5)); then
+        # A change can reorder the rows: keep the cursor on its host.
+        r=""
+        if [[ "$tab_for" == "$sel_name/$tab" ]] && ((rsel < ${#tab_rows[@]})); then r=${tab_rows[$rsel]%%$'\t'*}; fi
+        tab_rows=()
+        while IFS= read -r line; do [[ -n "$line" ]] && tab_rows+=("$line"); done <<<"$(status_tab_rows "$sel_name" "$tab" "${modes[$sel]:-enforce}")"
+        if [[ "$tab_for" != "$sel_name/$tab" ]]; then
+          rsel=0
+        elif [[ -n "$r" ]]; then
           for ((i = 0; i < ${#tab_rows[@]}; i++)); do
-            line=${tab_rows[$i]#*$'\t'}
-            # A change still running for this host, here or everywhere.
-            r=""
-            [[ -z "$busy" ]] || r=$(printf '%s' "$busy" | awk -F'\t' -v c="$sel_name" -v h="${tab_rows[$i]%%$'\t'*}" \
-              '($2 == c || $2 == "*") && $3 == h { print $4; exit }')
-            if [[ -n "$r" ]]; then line+="  · $r…"; fi
-            if ((i == rsel)) && [[ $focus == info ]]; then line=$'\033[7m'"$line"$'\033[27m'; fi
-            tagged+=$'\n'"R"$'\t'"$line"
+            if [[ "${tab_rows[$i]%%$'\t'*}" == "$r" ]]; then rsel=$i; break; fi
           done
         fi
+        tab_for="$sel_name/$tab"
+        tab_at=$SECONDS
       fi
-      status_frame_panels "$tagged" "$wide"
-      if [[ $focus == list ]]; then
-        keys="↑/↓ or j/k select · tab details · space start/stop · S force stop · D delete · q quit"
-      elif [[ $tab == network ]]; then
-        keys="j/k select · a allow here · A allow everywhere · m mode · h/l tabs · tab list · q quit"
-      elif [[ $tab == rules ]]; then
-        keys="j/k select · d remove · m mode · h/l tabs · tab list · q quit"
-      elif [[ $wide == true ]]; then
-        keys="↑/↓ or j/k scroll · tab list · space start/stop · S force stop · D delete · q quit"
+      if ((rsel >= ${#tab_rows[@]})); then rsel=$((${#tab_rows[@]} - 1)); fi
+      if ((rsel < 0)); then rsel=0; fi
+      if ((${#tab_rows[@]} == 0)); then
+        if [[ "$tab" == network ]]; then tagged+=$'\nR\tNothing logged in the last hour.'; else tagged+=$'\nR\tNo hosts.'; fi
       else
-        keys="↑/↓ or j/k scroll · esc back · space start/stop · S force stop · D delete · q quit"
+        if [[ "$tab" == network ]]; then
+          tagged+=$'\nR\tDECISION      HITS  LAST      HOST'
+        else
+          tagged+=$'\nR\tHOST                                         FROM'
+        fi
+        # Keep the cursor in view: the title, tab and header rows stay put.
+        if ((rsel < rtop)); then rtop=$rsel; fi
+        if ((rsel - rtop > term_rows - 10)); then rtop=$((rsel - term_rows + 10)); fi
+        for ((i = 0; i < ${#tab_rows[@]}; i++)); do
+          line=${tab_rows[$i]#*$'\t'}
+          # A change still running for this host, here or everywhere.
+          r=""
+          [[ -z "$busy" ]] || r=$(printf '%s' "$busy" | awk -F'\t' -v c="$sel_name" -v h="${tab_rows[$i]%%$'\t'*}" \
+            '($2 == c || $2 == "*") && $3 == h { print $4; exit }')
+          if [[ -n "$r" ]]; then line+="  · $r…"; fi
+          if ((i == rsel)) && [[ $focus == info ]]; then line=$'\033[7m'"$line"$'\033[27m'; fi
+          tagged+=$'\n'"R"$'\t'"$line"
+        done
       fi
-      if ((tabs_n > 1)) && [[ $focus == info && $tab == info ]]; then keys="${keys/ · q quit/ · h/l tabs · m mode · q quit}"; fi
     fi
-    # A question replaces the key help, in either layout.
-    if [[ -n "$ask" ]]; then keys="$ask_desc"; fi
-    frame+=("" "$keys")
-    if [[ -n "$msg" ]]; then
-      while IFS= read -r line; do frame+=("$line"); done <<<"$msg"
+    tui_frame_panels "$tagged" "$wide"
+    if [[ $focus == list ]]; then
+      keys="↑/↓ or j/k select · tab details · space start/stop · S force stop · D delete · q quit"
+    elif [[ $tab == network ]]; then
+      keys="j/k select · a allow here · A allow everywhere · m mode · h/l tabs · tab list · q quit"
+    elif [[ $tab == rules ]]; then
+      keys="j/k select · d remove · m mode · h/l tabs · tab list · q quit"
+    elif [[ $wide == true ]]; then
+      keys="↑/↓ or j/k scroll · tab list · space start/stop · S force stop · D delete · q quit"
+    else
+      keys="↑/↓ or j/k scroll · esc back · space start/stop · S force stop · D delete · q quit"
     fi
-    # No newline after the last row, or a full-height frame would scroll.
-    out=$'\033[H'
-    for ((i = 0; i < ${#frame[@]}; i++)); do
-      if ((i > 0)); then out+=$'\n'; fi
-      out+="${frame[$i]}"$'\033[K'
-    done
-    out+=$'\033[J'
-    printf '%s' "$out"
+    if ((tabs_n > 1)) && [[ $focus == info && $tab == info ]]; then keys="${keys/ · q quit/ · h/l tabs · m mode · q quit}"; fi
+  fi
+}
 
-    key=""
-    rc=0
-    IFS= read -rsn1 -t 1 key || rc=$?
-    # Enter reads as an empty key that succeeded; a timeout fails.
-    if ((rc == 0)) && [[ -z "$key" ]]; then key=enter; fi
-    if [[ "$key" == $'\033' ]]; then
-      rest=""
-      IFS= read -rsn2 -t 1 rest || true
-      case "$rest" in
-        "[A" | OA) key=k ;;
-        "[B" | OB) key=j ;;
-        "[C" | OC) key=l ;;
-        "[D" | OD) key=h ;;
-        "") key=esc ;;
-        *) key="" ;;
+status_answer() {
+  # The list may be empty by now; a delete uses the name it asked about.
+  local key="$1" name=${names[$sel]:-}
+  case "$ask" in
+    confirm | delete)
+      if [[ "$key" != y && "$key" != Y ]]; then
+        msg=$(tui_note "$msg" "Nothing changed")
+      elif ! tui_fits; then
+        msg=$(tui_note "$msg" "$ask_fit")
+      elif [[ "$ask" == confirm ]]; then
+        status_egress_job "${ask_args[@]}"
+      else
+        tui_job delete "${ask_args[0]}" "$SCRIPT_DIR/bxn" delete "${ask_args[0]}"
+        msg=$(tui_note "$msg" "Deleting ${ask_args[0]}…")
+      fi
+      ;;
+    mode)
+      case "$key" in
+        e) status_egress_job "Setting $name to enforce" mode "$name" enforce ;;
+        r) status_egress_job "Setting $name to report" mode "$name" report ;;
+        o) status_egress_job "Setting $name to off" mode "$name" off ;;
+        *) msg=$(tui_note "$msg" "Nothing changed") ;;
       esac
-    fi
-    if [[ -n "$ask" && -n "$key" ]]; then
-      # The list may be empty by now; a delete uses the name it asked about.
-      name=${names[$sel]:-}
-      case "$ask" in
-        confirm)
-          if [[ "$key" == y || "$key" == Y ]]; then
-            # The terminal can shrink while read waits for this answer.
-            # Check again at approval time, before starting any change.
-            size=$(stty size 2>/dev/null) || size=""
-            term_cols=${size##* }
-            if [[ "$term_cols" =~ ^[0-9]+$ ]] && ((${#ask_desc} < term_cols)); then
-              status_egress_job "${ask_args[@]}"
-            else
-              msg=$(status_note "$msg" "Host and scope do not fit; use bxn egress allow.")
-            fi
-          else
-            msg=$(status_note "$msg" "Nothing changed")
-          fi
-          ;;
-        delete)
-          if [[ "$key" == y || "$key" == Y ]]; then
-            # As with allow: the whole question must still be visible.
-            size=$(stty size 2>/dev/null) || size=""
-            term_cols=${size##* }
-            if [[ "$term_cols" =~ ^[0-9]+$ ]] && ((${#ask_desc} < term_cols)); then
-              status_job delete "${ask_args[0]}" "$SCRIPT_DIR/bxn" delete "${ask_args[0]}"
-              msg=$(status_note "$msg" "Deleting ${ask_args[0]}…")
-            else
-              msg=$(status_note "$msg" "The question does not fit; widen the terminal or use bxn rm.")
-            fi
-          else
-            msg=$(status_note "$msg" "Nothing changed")
-          fi
-          ;;
-        mode)
-          case "$key" in
-            e) status_egress_job "Setting $name to enforce" mode "$name" enforce ;;
-            r) status_egress_job "Setting $name to report" mode "$name" report ;;
-            o) status_egress_job "Setting $name to off" mode "$name" off ;;
-            *) msg=$(status_note "$msg" "Nothing changed") ;;
-          esac
-          ;;
-      esac
-      ask=""
-      continue
-    fi
-    case "$key" in
-      q | Q) break ;;
-      esc) if [[ $focus == info ]]; then focus=list; else break; fi ;;
-      $'\t')
-        if [[ $focus == list ]] && ((count > 0)); then focus=info; else focus=list; fi
+      ;;
+  esac
+}
+
+status_key() {
+  local key="$1" name r line verb why
+  case "$key" in
+    q | Q) leave=true ;;
+    esc) if [[ $focus == info ]]; then focus=list; else leave=true; fi ;;
+    $'\t')
+      if [[ $focus == list ]] && ((count > 0)); then focus=info; else focus=list; fi
+      rtop=0
+      ;;
+    enter) if ((count > 0)); then focus=info; rtop=0; fi ;;
+    h | l)
+      if [[ $focus == info ]] && ((tabs_n > 1)); then
+        case "$tab:$key" in
+          info:l) tab=network ;; network:l) tab=rules ;; rules:l) tab=info ;;
+          info:h) tab=rules ;; network:h) tab=info ;; rules:h) tab=network ;;
+        esac
         rtop=0
-        ;;
-      enter) if ((count > 0)); then focus=info; rtop=0; fi ;;
-      h | l)
-        if [[ $focus == info ]] && ((tabs_n > 1)); then
-          case "$tab:$key" in
-            info:l) tab=network ;; network:l) tab=rules ;; rules:l) tab=info ;;
-            info:h) tab=rules ;; network:h) tab=info ;; rules:h) tab=network ;;
-          esac
-          rtop=0
-          rsel=0
+        rsel=0
+      fi
+      ;;
+    a | A)
+      if [[ $focus == info && $tab == network ]] && ((${#tab_rows[@]} > 0)); then
+        name=${names[$sel]}
+        r=${tab_rows[$rsel]%%$'\t'*}
+        ask=confirm
+        ask_fit="Host and scope do not fit; use bxn egress allow."
+        if [[ "$key" == a ]]; then
+          ask_desc="Allow $r for $name? y/n"
+          ask_args=("Allowing $r for $name" allow "$name" "$r")
+        else
+          ask_desc="Allow $r for every container? y/n"
+          ask_args=("Allowing $r everywhere" allow --all "$r" --yes)
         fi
-        ;;
-      a | A)
-        if [[ $focus == info && $tab == network ]] && ((${#tab_rows[@]} > 0)); then
-          name=${names[$sel]}
-          r=${tab_rows[$rsel]%%$'\t'*}
+      fi
+      ;;
+    d)
+      if [[ $focus == info && $tab == rules ]] && ((${#tab_rows[@]} > 0)); then
+        name=${names[$sel]}
+        r=${tab_rows[$rsel]%%$'\t'*}
+        line=${tab_rows[$rsel]#*$'\t'}
+        # The sources start after the 44-column host and a space; the
+        # container's own list is always named last.
+        if [[ ", ${line:45}" == *", $name" ]]; then
           ask=confirm
-          if [[ "$key" == a ]]; then
-            ask_desc="Allow $r for $name? y/n"
-            ask_args=("Allowing $r for $name" allow "$name" "$r")
-          else
-            ask_desc="Allow $r for every container? y/n"
-            ask_args=("Allowing $r everywhere" allow --all "$r" --yes)
-          fi
-        fi
-        ;;
-      d)
-        if [[ $focus == info && $tab == rules ]] && ((${#tab_rows[@]} > 0)); then
-          name=${names[$sel]}
-          r=${tab_rows[$rsel]%%$'\t'*}
-          line=${tab_rows[$rsel]#*$'\t'}
-          # The sources start after the 44-column host and a space; the
-          # container's own list is always named last.
-          if [[ ", ${line:45}" == *", $name" ]]; then
-            ask=confirm
-            ask_desc="Remove $r from $name? Its open connections through the proxy end. y/n"
-            ask_args=("Removing $r from $name" rm "$name" "$r")
-          else
-            msg=$(status_note "$msg" "$r isn't on $name's own list; it comes from ${line:45}")
-          fi
-        fi
-        ;;
-      m)
-        if [[ $focus == info ]] && ((tabs_n > 1)); then
-          ask=mode
-          ask_desc="Mode for ${names[$sel]}: e enforce · r report · o off (turning it on restarts an open container) · other key cancels"
-        fi
-        ;;
-      j)
-        if [[ $focus == info && $tab != info ]]; then
-          rsel=$((rsel + 1))
-        elif [[ $focus == info ]]; then
-          rtop=$((rtop + 1))
-        elif ((sel < count - 1)); then
-          sel=$((sel + 1))
-          rtop=0
-          tab=info
-        fi
-        ;;
-      k)
-        if [[ $focus == info && $tab != info ]]; then
-          if ((rsel > 0)); then rsel=$((rsel - 1)); fi
-        elif [[ $focus == info ]]; then
-          if ((rtop > 0)); then rtop=$((rtop - 1)); fi
-        elif ((sel > 0)); then
-          sel=$((sel - 1))
-          rtop=0
-          tab=info
-        fi
-        ;;
-      D)
-        ((count > 0)) || continue
-        [[ $focus == list || $tab == info ]] || continue
-        name=${names[$sel]}
-        if [[ "$pending" == *$'\t'"$name"$'\t'* ]]; then
-          msg=$(status_note "$msg" "$name is busy")
-        elif [[ "${mgds[$sel]}" != yes ]]; then
-          msg=$(status_note "$msg" "$name wasn't made by bxn; delete it with incus delete")
-        elif [[ "${roles[$sel]}" == egress ]]; then
-          msg=$(status_note "$msg" "$name runs other containers' proxies; it isn't deleted from here")
+          ask_fit="Host and scope do not fit; use bxn egress allow."
+          ask_desc="Remove $r from $name? Its open connections through the proxy end. y/n"
+          ask_args=("Removing $r from $name" rm "$name" "$r")
         else
-          # The name is fixed now: the list can reorder before the answer.
-          ask=delete
-          ask_desc="Delete $name and everything in it? This can't be undone. y/n"
-          ask_args=("$name")
+          msg=$(tui_note "$msg" "$r isn't on $name's own list; it comes from ${line:45}")
         fi
-        ;;
-      S)
-        # Force stop: the one key that works while a graceful stop of the
-        # same instance is pending, since a stuck stop is what it's for.
-        # Any other pending job (a start, a delete, an egress change, or an
-        # earlier force stop) still makes it busy. Only where the key help
-        # offers it, like D: not in Network or Rules.
-        ((count > 0)) || continue
-        [[ $focus == list || $tab == info ]] || continue
-        name=${names[$sel]}
-        if status_busy_except_stop "$name"; then
-          msg=$(status_note "$msg" "$name is busy")
-        elif [[ "${states[$sel]}" == Stopped ]]; then
-          msg=$(status_note "$msg" "$name is already stopped")
-        else
-          status_job force-stop "$name" incus stop --force "$name"
-          msg=$(status_note "$msg" "Force stopping $name…")
+      fi
+      ;;
+    m)
+      if [[ $focus == info ]] && ((tabs_n > 1)); then
+        ask=mode
+        ask_fit=""
+        ask_desc="Mode for ${names[$sel]}: e enforce · r report · o off (turning it on restarts an open container) · other key cancels"
+      fi
+      ;;
+    j)
+      if [[ $focus == info && $tab != info ]]; then
+        rsel=$((rsel + 1))
+      elif [[ $focus == info ]]; then
+        rtop=$((rtop + 1))
+      elif ((sel < count - 1)); then
+        sel=$((sel + 1))
+        rtop=0
+        tab=info
+      fi
+      ;;
+    k)
+      if [[ $focus == info && $tab != info ]]; then
+        if ((rsel > 0)); then rsel=$((rsel - 1)); fi
+      elif [[ $focus == info ]]; then
+        if ((rtop > 0)); then rtop=$((rtop - 1)); fi
+      elif ((sel > 0)); then
+        sel=$((sel - 1))
+        rtop=0
+        tab=info
+      fi
+      ;;
+    D)
+      ((count > 0)) || return 0
+      [[ $focus == list || $tab == info ]] || return 0
+      name=${names[$sel]}
+      if [[ "$pending" == *$'\t'"$name"$'\t'* ]]; then
+        msg=$(tui_note "$msg" "$name is busy")
+      elif [[ "${mgds[$sel]}" != yes ]]; then
+        msg=$(tui_note "$msg" "$name wasn't made by bxn; delete it with incus delete")
+      elif [[ "${roles[$sel]}" == egress ]]; then
+        msg=$(tui_note "$msg" "$name runs other containers' proxies; it isn't deleted from here")
+      else
+        # The name is fixed now: the list can reorder before the answer.
+        ask=delete
+        ask_fit="The question does not fit; widen the terminal or use bxn rm."
+        ask_desc="Delete $name and everything in it? This can't be undone. y/n"
+        ask_args=("$name")
+      fi
+      ;;
+    S)
+      # Force stop: the one key that works while a graceful stop of the
+      # same instance is pending, since a stuck stop is what it's for.
+      # Any other pending job (a start, a delete, an egress change, or an
+      # earlier force stop) still makes it busy. Only where the key help
+      # offers it, like D: not in Network or Rules.
+      ((count > 0)) || return 0
+      [[ $focus == list || $tab == info ]] || return 0
+      name=${names[$sel]}
+      if status_busy_except_stop "$name"; then
+        msg=$(tui_note "$msg" "$name is busy")
+      elif [[ "${states[$sel]}" == Stopped ]]; then
+        msg=$(tui_note "$msg" "$name is already stopped")
+      else
+        tui_job force-stop "$name" incus stop --force "$name"
+        msg=$(tui_note "$msg" "Force stopping $name…")
+      fi
+      ;;
+    " ")
+      ((count > 0)) || return 0
+      name=${names[$sel]}
+      if [[ "$pending" == *$'\t'"$name"$'\t'* ]]; then
+        msg=$(tui_note "$msg" "$name is busy")
+        return 0
+      fi
+      if [[ "${states[$sel]}" == Running ]]; then verb=stop; else verb=start; fi
+      if [[ $verb == start && "${trans[$sel]}" != none ]]; then
+        msg=$(tui_note "$msg" "$name is partway through turning its allowlist on; finish it: bxn egress refresh $name")
+        return 0
+      fi
+      # A build that isn't done (boxen.build).
+      if [[ $verb == start ]]; then
+        why=$(build_unstartable "$name")
+        if [[ -n "$why" ]]; then
+          msg=$(tui_note "$msg" "$why")
+          return 0
         fi
-        ;;
-      " ")
-        ((count > 0)) || continue
-        name=${names[$sel]}
-        if [[ "$pending" == *$'\t'"$name"$'\t'* ]]; then
-          msg=$(status_note "$msg" "$name is busy")
-          continue
-        fi
-        if [[ "${states[$sel]}" == Running ]]; then verb=stop; else verb=start; fi
-        if [[ $verb == start && "${trans[$sel]}" != none ]]; then
-          msg=$(status_note "$msg" "$name is partway through turning its allowlist on; finish it: bxn egress refresh $name")
-          continue
-        fi
-        # A build that isn't done (boxen.build).
-        if [[ $verb == start ]]; then
-          why=$(build_unstartable "$name")
-          if [[ -n "$why" ]]; then
-            msg=$(status_note "$msg" "$why")
-            continue
-          fi
-        fi
-        status_job "$verb" "$name" incus "$verb" "$name"
-        if [[ $verb == stop ]]; then line="Stopping $name…"; else line="Starting $name…"; fi
-        msg=$(status_note "$msg" "$line")
-        ;;
-    esac
-    if ((count > 0)); then sel_name=${names[$sel]}; fi
-  done
+      fi
+      tui_job "$verb" "$name" incus "$verb" "$name"
+      if [[ $verb == stop ]]; then line="Stopping $name…"; else line="Starting $name…"; fi
+      msg=$(tui_note "$msg" "$line")
+      ;;
+  esac
+  if ((count > 0)); then sel_name=${names[$sel]}; fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1285,6 +1359,80 @@ fi
 SNIPPET
 }
 
+# Run in the container as its user by rm_unpushed_counts, with the workspace
+# as $1. Kept out of $(...) so bash 3.2 never scans it for parens. Optional
+# locks off, so it never contends with git the agent is running. A missing
+# workspace holds nothing; one that is there but can't be entered is a check
+# that failed. Commits count from every branch and from HEAD, which may be
+# detached (mid-rebase, or checked out by hash); a repository with no
+# commits yet has no HEAD to count from.
+RM_CHECK_SCRIPT='
+export GIT_OPTIONAL_LOCKS=0
+[ -e "$1" ] || { echo "bxn-rm-check none"; exit 0; }
+cd "$1" || exit 1
+[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || { echo "bxn-rm-check none"; exit 0; }
+files=$(git status --porcelain) || exit 1
+stashes=$(git stash list) || exit 1
+head=
+git rev-parse -q --verify HEAD >/dev/null && head=HEAD
+commits=$(git rev-list --count --branches $head --not --remotes) || exit 1
+echo "bxn-rm-check $(printf "%s" "$files" | grep -c .) $commits $(printf "%s" "$stashes" | grep -c .)"
+'
+
+# What deleting <container> would lose from its workspace. Prints
+# "<changed or new files> <commits on no remote> <stashes>", "none" when the
+# workspace isn't a git repository, "stopped" when the container isn't
+# running, or nothing when the check failed. Only those words and numbers
+# come back from the container, so nothing it writes reaches the terminal.
+rm_unpushed_counts() {
+  local c="$1" ws ws_q out line
+  if [[ "$(incus list "^${c}\$" --format csv --columns s 2>/dev/null)" != RUNNING ]]; then
+    echo stopped
+    return 0
+  fi
+  ws="$(incus config get "$c" user.boxen.workspace 2>/dev/null || true)"
+  ws="${ws:-/workspace}"
+  printf -v ws_q '%q' "$ws"
+  # The user's login shell reads the -c line, so the %q quoting suits it.
+  out="$(printf '%s' "$RM_CHECK_SCRIPT" |
+    incus exec "$c" -- su - "$(id -un)" -c "timeout 30 sh -s -- $ws_q" 2>/dev/null)" || return 0
+  line="$(printf '%s\n' "$out" | grep -E '^bxn-rm-check (none|[0-9]+ [0-9]+ [0-9]+)$' | tail -n 1)" || return 0
+  echo "${line#bxn-rm-check }"
+}
+
+# "1 commit" or "2 commits". Usage: plural <n> <one> <many>
+plural() { if [[ "$1" == 1 ]]; then echo "1 $2"; else echo "$1 $3"; fi; }
+
+# Before bxn rm deletes <container>: if its workspace holds work that isn't
+# pushed, or bxn can't tell, asks on a terminal. Off one, refuses when there
+# is work and goes ahead (with a note) when it can't tell, as before.
+rm_confirm_unpushed() {
+  local c="$1" counts what list="" known=0 ans
+  counts="$(rm_unpushed_counts "$c")"
+  case "$counts" in
+    none|"0 0 0") return 0 ;;
+    stopped) what="$c isn't running, so bxn can't check it for work that isn't pushed" ;;
+    "") what="bxn couldn't check $c for work that isn't pushed" ;;
+    *)
+      set -- $counts
+      [[ "$1" == 0 ]] || list+=", $(plural "$1" "changed or new file" "changed or new files")"
+      [[ "$2" == 0 ]] || list+=", $(plural "$2" "commit on no remote" "commits on no remote")"
+      [[ "$3" == 0 ]] || list+=", $(plural "$3" stash stashes)"
+      what="$c has work that isn't pushed: ${list#, }"
+      known=1
+      ;;
+  esac
+  if [[ -t 0 ]]; then
+    echo -e "${YELLOW}[!]${NC} $what" >&2
+    read -r -p "Delete $c anyway? [y/N] " ans || ans=""
+    [[ "$ans" == y || "$ans" == Y ]] || { echo "Nothing deleted" >&2; exit 1; }
+  elif [[ $known == 1 ]]; then
+    error "$what. Push it first, or delete it anyway: bxn rm --force $c"
+  else
+    echo -e "${YELLOW}[!]${NC} $what" >&2
+  fi
+}
+
 # A bare bxn on a terminal opens the live status view. Piped, scripted, or
 # without jq for the view, it prints help instead.
 if [[ $# -eq 0 ]]; then
@@ -1341,11 +1489,17 @@ case "$1" in
     ;;
   rm|-d|delete)  # -d and delete are the old spellings, kept for scripts
     shift
-    [[ $# -lt 1 ]] && error "Usage: bxn rm <container>"
+    _force=0
+    _args=()
+    for _a in "$@"; do
+      if [[ "$_a" == --force || "$_a" == -f ]]; then _force=1; else _args+=("$_a"); fi
+    done
+    [[ ${#_args[@]} -lt 1 ]] && error "Usage: bxn rm [--force] <container>"
     # Deleting takes no default: chad-claude-web and chad-claude-web-1 make
     # bxn rm web ambiguous, though bxn web opens the first.
-    RESOLVE_STRICT=1 resolve_container_arg "$@"
+    RESOLVE_STRICT=1 resolve_container_arg "${_args[@]}"
     set -- "${RARGS[@]}"
+    [[ $_force == 1 ]] || rm_confirm_unpushed "$1"
     _egress="$(incus config get "$1" user.boxen.egress.container 2>/dev/null || true)"
     incus delete --force "$1"
     log "Deleted $1"
