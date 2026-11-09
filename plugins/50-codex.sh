@@ -17,20 +17,40 @@ PLUGIN_RUN_ON_LAUNCH=1
 #
 # The profile lets bwrap, and nothing else, use user namespaces. It's loaded
 # first and written to /etc/apparmor.d only once it loads, so a failure
-# leaves nothing behind, and a success outlives a reboot. A profile at that
-# path that bxn didn't write is left as it is.
+# leaves nothing behind, and a success outlives a reboot. Any other bwrap
+# profile is left as it is, and bxn's isn't loaded beside it: one at that
+# path that bxn didn't write, one in another file there (newer Ubuntu
+# releases ship their own, stricter one), or one already loaded that isn't
+# bxn's.
 #
-# Run in the guest as root: sh -s -- <restriction sysctl> <profile path> <bwrap>
+# Run in the guest as root:
+#   sh -s -- <restriction sysctl> <profile path> <bwrap> <loaded profiles list>
 CODEX_BWRAP_SCRIPT='
 set -eu
 restrict=$1
 dest=$2
 bwrap=$3
+loaded=$4
 systemd-detect-virt --vm --quiet || exit 0
 [ "$(cat "$restrict" 2>/dev/null)" = 1 ] || exit 0
 [ -x "$bwrap" ] || exit 0
-if [ -e "$dest" ] && ! grep -q "^# bxn: codex plugin" "$dest"; then
-  echo "$dest was not written by bxn; leaving it as it is" >&2
+mine=no
+if [ -e "$dest" ]; then
+  if ! grep -q "^# bxn: codex plugin" "$dest"; then
+    echo "$dest was not written by bxn; leaving it as it is" >&2
+    exit 0
+  fi
+  mine=yes
+fi
+for f in "${dest%/*}"/*; do
+  [ "$f" != "$dest" ] && [ -f "$f" ] || continue
+  if grep -q "^[[:space:]]*profile bwrap[[:space:]]" "$f"; then
+    echo "$f has a bwrap profile already; leaving it as it is" >&2
+    exit 0
+  fi
+done
+if [ "$mine" = no ] && grep -q "^bwrap (" "$loaded" 2>/dev/null; then
+  echo "A bwrap profile is loaded already; leaving it as it is" >&2
   exit 0
 fi
 profile="# bxn: codex plugin. Lets bubblewrap, which Codex runs commands in, use user namespaces.
@@ -48,7 +68,8 @@ printf "%s\n" "$profile" > "$dest"
 codex_bwrap_profile() {
   printf '%s' "$CODEX_BWRAP_SCRIPT" |
     incus exec "$CONTAINER_NAME" -- sh -s -- \
-      /proc/sys/kernel/apparmor_restrict_unprivileged_userns /etc/apparmor.d/bwrap /usr/bin/bwrap ||
+      /proc/sys/kernel/apparmor_restrict_unprivileged_userns /etc/apparmor.d/bwrap /usr/bin/bwrap \
+      /sys/kernel/security/apparmor/profiles ||
     warn "Could not let bubblewrap use user namespaces: Codex's sandbox may fail with 'Failed RTM_NEWADDR'. See SANDBOX.md."
 }
 
