@@ -1,0 +1,21 @@
+bxn.egress
+  s_ca93edf61f0d5e::t_2a8e23d5ec59a4 368-371
+tests/egress_register_test.sh
+  s_ca93edf61f0d5e::t_b3162aba155d54 82-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6b6e8f519c297fbb3514ffd931414b9ce8c1c49e",
+  "prompts": {},
+  "sessions": {
+    "s_ca93edf61f0d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09a75c5-e2d1-4edd-baab-34535d2ad01f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
