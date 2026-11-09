@@ -60,12 +60,15 @@ Commands:
   <container>                    Shell into container (default)
   -s, shell [--with-sudo] <container> [cmd]
                                  Shell into container (--with-sudo grants temporary sudo)
-  -c, create <project> [args...] Create a container named HANDLE-AGENT-PROJECT,
-                                 with one agent (or a shell); numbered -1, -2
-                                 when the name is taken (bxn create -h)
+  -c, create <project> [args...] Create a VM (--container for a system
+                                 container) named HANDLE-AGENT-PROJECT, with
+                                 one agent (or a shell); numbered -1, -2 when
+                                 the name is taken (bxn create -h)
   -c, create <project> <github-url>
                                  The same, with a clone of the repository as
                                  its workspace, not a copy of this directory
+  -c, create --template <name>   Build and save a reusable template, launched
+                                 later with bxn -c <project> --from <name>
   handle [<new>]                 Show or change your handle, the first part of
                                  every container name
   -n, net <container> [ports...] Manage port proxies
@@ -95,6 +98,8 @@ Commands:
                                  repository's, or a repository or directory of
                                  your own in their place (bxn plugins -h)
   new-plugin <slug> [opts]       Generate a new plugin file from a template
+  notify-snippet                 Print a shell hook that reports failed nightly
+                                 updates (bxn notify-snippet >> ~/.zshrc)
   -h, help                       Show this help
 
 Cron:
@@ -110,7 +115,9 @@ Examples:
   bxn your-container                        Shell into your-container
   bxn -s your-container                     Shell into your-container (explicit)
   bxn -s your-container mix test            Run a command in your-container
-  bxn -c your-container                     Create your-container
+  bxn -c your-container                     Create your-container (a VM)
+  bxn -c your-container --container         Create your-container as a system container
+  bxn -c --template base-dev                Save a template named base-dev
   bxn -c your-container --from base-dev     Create your-container from template
   bxn create web https://github.com/OWNER/REPO
                                             Create a container for web with that

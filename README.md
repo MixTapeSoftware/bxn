@@ -88,7 +88,9 @@ bxn my-project                        # Shell into container (default)
 bxn -s my-project                     # Shell (explicit)
 bxn -s my-project mix test            # Run a command in container
 bxn -s my-project "mix test | tail"   # One quoted string runs as a shell line
-bxn -c my-project                     # Create a new container
+bxn -c my-project                     # Create a new VM
+bxn -c my-project --container         # Create a system container instead
+bxn -c --template base-dev            # Save a reusable template named base-dev
 bxn -c my-project --from base-dev     # Create from template
 bxn create my-project https://github.com/OWNER/REPO   # Create with that repository cloned in
 bxn -n my-project 4000 3241           # Proxy ports 4000 and 3241 to localhost
