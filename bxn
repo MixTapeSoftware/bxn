@@ -353,14 +353,21 @@ cmd_set_env() {
 # for now; $host = {cpus, mem} from the Incus resources API, either may be
 # null; $color = bool; $sel = index of the row to highlight, or -1, counted
 # in display order (ordered, from STATUS_ORDER_DEFS). Instances are grouped into Boxen
-# instances and all others. CPU is shown relative to the whole host; memory
+# instances, by project, and all others. CPU is shown relative to the whole host; memory
 # against the instance's own limits.memory when it has one (every VM does)
 # that the host can back, else the host total. Keep the program free of
 # single quotes — it lives in a single-quoted string.
 # ---------------------------------------------------------------------------
 STATUS_ORDER_DEFS='
 def managed: .expanded_config["user.managed-by"] == "boxen";
-def ordered: map(select(managed)) + map(select(managed | not));
+# Names run HANDLE-AGENT-PROJECT, so name order splits a project across its
+# agents. Boxen instances sort by project label (the name when there is
+# none), then name, with helpers such as egress containers after them.
+def boxenkey: (.expanded_config // {}) as $c | .name as $n
+  | [ (if ($c["user.boxen.role"] // "") == "" then 0 else 1 end),
+      (if ($c["user.boxen.project"] // "") == "" then $n else $c["user.boxen.project"] end),
+      $n ];
+def ordered: (map(select(managed)) | sort_by(boxenkey)) + map(select(managed | not));
 '
 
 STATUS_DEFS="$STATUS_ORDER_DEFS"'
