@@ -37,6 +37,9 @@
 #   FAKE_GH_FAIL           regex; a `gh` run inside an instance whose arguments match exits 1
 #   FAKE_INCUS_EXTENSIONS  API extensions `incus query /1.0` lists
 #                          (default: network_bridge_acl_devices network_address_set)
+#   FAKE_INCUS_LATE_OUTPUT `image info` pauses before the lines after Type, as a
+#                          real incus can still be writing when a reader that
+#                          stops early has gone: it then dies of SIGPIPE (141)
 set -uo pipefail
 
 S="${FAKE_INCUS_STATE:?FAKE_INCUS_STATE must be set}"
@@ -224,7 +227,11 @@ case "$cmd" in
 
   image)
     [[ "$1" == info && -d "$S/images/$2" ]] || die "Image not found: ${2:-}"
+    # As incus prints it, abridged.
+    printf 'Fingerprint: 0123456789ab\nSize: 812.50MiB\nArchitecture: x86_64\n'
     echo "Type: ${FAKE_INCUS_IMAGE_TYPE:-container}"
+    [[ -z "${FAKE_INCUS_LATE_OUTPUT:-}" ]] || sleep 0.3
+    printf 'Public: no\nProperties:\n    description: boxen template\nAliases:\n    - %s\nProfiles:\n    - default\n' "$2"
     ;;
 
   publish)

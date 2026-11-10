@@ -196,6 +196,13 @@ init ctvm --vm
 assert_eq "--vm on a container template is refused" "1" "$RC"
 assert_contains "saying why" "is a container image; drop --vm" "$(cat "$SANDBOX/out")"
 assert_eq "and nothing is created" "no" "$([[ -d "$FAKE_INCUS_STATE/instances/ctvm" ]] && echo yes || echo no)"
+# incus can still be writing the rest of `image info` once its Type is read:
+# that must not end the build, with no word, on the SIGPIPE it gets.
+bash "$SCRIPT_DIR/lib/early_awk" "$SANDBOX/early"
+fresh; template
+PATH="$SANDBOX/early:$PATH" FAKE_INCUS_LATE_OUTPUT=1 FAKE_INCUS_IMAGE_TYPE=virtual-machine init vmlate
+assert_eq "a template's type is read while incus is still writing" "0" "$RC"
+assert_eq "and decides the launch" "default boxen-net" "$(inst vmlate profiles | tr '\n' ' ' | sed 's/ $//')"
 fresh; template
 FAKE_INCUS_IMAGE_TYPE=virtual-machine init vmct --container
 assert_eq "--container on a VM template is refused" "1" "$RC"

@@ -1,0 +1,13 @@
+#!/bin/bash
+# tests/lib/early_awk <dir>
+# Puts in <dir> an awk that stops reading its input when it exits, as gawk and
+# macOS awk do, so a writer still going gets SIGPIPE. mawk, Debian's and
+# Ubuntu's default, reads on to the end unless it's interactive, which hides
+# that. With any other awk, <dir> is left empty: the awk there stops already.
+# Put <dir> first in PATH for the commands that should see it.
+set -euo pipefail
+mkdir -p "$1"
+if awk -W version 2>&1 </dev/null | grep -q '^mawk'; then
+  printf '#!/bin/sh\nexec %s -W interactive "$@"\n' "$(command -v mawk)" > "$1/awk"
+  chmod +x "$1/awk"
+fi

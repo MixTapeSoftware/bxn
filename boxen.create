@@ -1522,8 +1522,10 @@ if [[ "$BASE_IMAGE" == incus-init/* || "$BASE_IMAGE" == local:incus-init/* ]]; t
   # Local templates are single-type: a VM template can't launch as a container
   # and vice-versa. With no --vm or --container the template's type decides; a
   # flag that contradicts it fails here with a clear message instead of a
-  # cryptic one mid-launch.
-  _img_type="$(incus image info "$BASE_IMAGE" 2>/dev/null | awk -F': ' '/^Type:/{print $2; exit}')"
+  # cryptic one mid-launch. awk reads to the end: one that stopped at Type
+  # could leave incus writing to a closed pipe, and its SIGPIPE (141) would
+  # end the build here with no word, under pipefail.
+  _img_type="$(incus image info "$BASE_IMAGE" 2>/dev/null | awk -F': ' '/^Type:/ && t == "" { t = $2 } END { print t }')"
   if [[ "$_img_type" == "container" ]]; then
     [[ "$TYPE_FLAG" != vm ]] || error "Template '$BASE_IMAGE' is a container image; drop --vm, or rebuild the template as a VM."
     [[ -n "$TYPE_FLAG" ]] || log "Template '$BASE_IMAGE' is a container image; launching as a container"
