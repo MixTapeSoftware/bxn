@@ -88,6 +88,8 @@ cat > "$S/instances.json" <<'EOF'
     "user.boxen.egress":"enforce","user.boxen.egress.port":"10000","user.boxen.egress.active":"enforce:0123456789abcdef",
     "user.boxen.egress.plugin-allow":"*.tailscale.com,tailscale.com"},
   "state":{"pid":100,"cpu":{"usage":5000000000},"memory":{"usage":432316416},"disk":{},"network":{}}},
+ {"name":"plain","status":"Running","type":"container","expanded_config":{"user.managed-by":"boxen"},
+  "state":{"pid":102,"cpu":{"usage":5000000000},"memory":{"usage":432316416},"disk":{},"network":{}}},
  {"name":"rbox","status":"Running","type":"container",
   "expanded_config":{"user.managed-by":"boxen","user.boxen.egress.container":"boxen-egress",
     "user.boxen.egress":"report","user.boxen.egress.port":"10001","user.boxen.egress.active":"enforce:0123456789abcdef"},
@@ -96,8 +98,6 @@ cat > "$S/instances.json" <<'EOF'
   "expanded_config":{"user.managed-by":"boxen","user.boxen.egress.container":"boxen-egress",
     "user.boxen.egress":"enforce","user.boxen.egress.transition":"enforce:10.201.0.30"},
   "state":{"pid":0,"cpu":{"usage":0},"memory":{"usage":0},"disk":{},"network":null}},
- {"name":"plain","status":"Running","type":"container","expanded_config":{"user.managed-by":"boxen"},
-  "state":{"pid":102,"cpu":{"usage":5000000000},"memory":{"usage":432316416},"disk":{},"network":{}}},
  {"name":"boxen-egress","status":"Running","type":"container","expanded_config":{"user.managed-by":"boxen","user.boxen.role":"egress"},
   "state":{"pid":103,"cpu":{"usage":5000000000},"memory":{"usage":432316416},"disk":{},"network":{}}},
  {"name":"other","status":"Running","type":"container","expanded_config":{},
@@ -131,7 +131,7 @@ assert_contains "Info shows the mode" "Egress        enforce: only listed hosts"
 assert_contains "Info shows the proxy" "Proxy         boxen-egress:10000" "$frame"
 assert_contains "Info marks Tailscale as not confined" "Tailscale     not confined against a determined agent" "$frame"
 assert_contains "the tabs are listed" "Network" "$frame"
-out=$(keys j | tui) || true
+out=$(keys j j | tui) || true
 assert_contains "a mode that isn't applied is called out" "wants report, runs enforce: bxn egress refresh rbox" "$(last_frame "$out" | plain)"
 
 echo "the Network tab"
@@ -184,7 +184,7 @@ rm -f "$S/slow"
 printf 'own.example\tbox\n' > "$S/rules"
 out=$(keys '\t' l | KEEP_RULES=1 tui) || true
 assert_contains "an allowed host taken off an enforced list reads as blocked" "blocked now      1  10:01:00  api.anthropic.com:443" "$(last_frame "$out" | plain)"
-out=$(keys j '\t' l | KEEP_RULES=1 tui) || true
+out=$(keys j j '\t' l | KEEP_RULES=1 tui) || true
 assert_contains "and as unlisted under report" "unlisted now     1  10:01:00  api.anthropic.com:443" "$(last_frame "$out" | plain)"
 printf 'api.anthropic.com\tbaseline\n*.rs\tbox\n' > "$S/rules"
 out=$(keys '\t' l | KEEP_RULES=1 tui) || true
@@ -260,23 +260,23 @@ assert_eq "r sets report" "mode box report" "$(cat "$S/egress-calls" 2>/dev/null
 out=$(keys '\t' m o '' l | tui) || true
 assert_eq "a job that prints nothing runs" "mode box off" "$(cat "$S/egress-calls" 2>/dev/null)"
 assert_contains "and the view still answers keys after it" "DECISION" "$(last_frame "$out" | plain)"
-out=$(keys j j ' ' | tui) || true
+out=$(keys j j j ' ' | tui) || true
 assert_eq "space won't start a container behind the barrier" "" "$(cat "$S/calls" 2>/dev/null)"
 assert_contains "and says how to finish" "finish it: bxn egress refresh stuck" "$(last_frame "$out" | plain)"
-out=$(keys j j j '\t' l | tui) || true
+out=$(keys j '\t' l | tui) || true
 assert_eq "a container with no allowlist has only Info" "" "$(last_frame "$out" | plain | grep -o 'DECISION' || true)"
 
 echo "delete"
 out=$(keys | tui) || true
 assert_contains "the key help offers delete" "D delete" "$(last_frame "$out" | plain)"
-out=$(keys j j j D | tui) || true
+out=$(keys j D | tui) || true
 assert_contains "D asks first, naming the container" "Delete plain and everything in it? This can't be undone. y/n" "$(plain <<<"$out")"
-out=$(keys j j j D n | tui) || true
+out=$(keys j D n | tui) || true
 assert_eq "n deletes nothing" "" "$(cat "$S/calls" 2>/dev/null)"
 assert_contains "and says so" "Nothing changed" "$(last_frame "$out" | plain)"
-out=$(keys j j j d | tui) || true
+out=$(keys j d | tui) || true
 assert_eq "a lowercase d in the list deletes nothing" "" "$(cat "$S/calls" 2>/dev/null)"
-out=$(keys j j j D y | tui) || true
+out=$(keys j D y | tui) || true
 assert_eq "y deletes it through bxn rm" "delete --force plain" "$(cat "$S/calls" 2>/dev/null)"
 assert_contains "the result is shown" "Deleted plain" "$(last_frame "$out" | plain)"
 out=$(keys j j j j D y | tui) || true
@@ -287,7 +287,7 @@ assert_eq "an instance bxn didn't make isn't deleted" "" "$(cat "$S/calls" 2>/de
 assert_contains "and says so" "wasn't made by bxn" "$(last_frame "$out" | plain)"
 # The list empties while the question is open: answering mustn't end the view.
 cp "$S/instances.json" "$S/instances.saved"
-out=$( { sleep 1.5; for k in j j j D; do printf '%s' "$k"; sleep 0.6; done
+out=$( { sleep 1.5; for k in j D; do printf '%s' "$k"; sleep 0.6; done
          echo '[]' > "$S/instances.json"; sleep 1.5; printf y; sleep 1; printf q; sleep 0.4; printf q; sleep 0.5; } | tui ) || true
 mv "$S/instances.saved" "$S/instances.json"
 assert_eq "an answer after the list empties doesn't crash the view" "no" "$([[ "$out" == *"unbound variable"* ]] && echo yes || echo no)"
