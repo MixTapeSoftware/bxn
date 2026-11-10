@@ -1,0 +1,25 @@
+tests/lib/early_awk
+  s_7d25aa5b984683::t_436aec75701ac5 1-13
+tests/lib/fake_incus
+  s_7d25aa5b984683::t_436aec75701ac5 40-42,230-231,233-234
+tests/net_test.sh
+  s_7d25aa5b984683::t_436aec75701ac5 199-205
+boxen.create
+  s_7d25aa5b984683::t_436aec75701ac5 1525-1528
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b425cb4f1239329afce6afa0bd2d66d80ed85038",
+  "prompts": {},
+  "sessions": {
+    "s_7d25aa5b984683": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71aaa015-6a46-4cf4-9924-75716400660b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}

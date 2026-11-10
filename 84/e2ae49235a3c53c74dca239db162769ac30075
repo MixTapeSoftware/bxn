@@ -1,0 +1,23 @@
+README.md
+  s_7d25aa5b984683::t_436aec75701ac5 287,319
+plugins/55-botfight.sh
+  s_7d25aa5b984683::t_436aec75701ac5 1-53
+tests/botfight_plugin_test.sh
+  s_7d25aa5b984683::t_436aec75701ac5 1-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "84e2ae49235a3c53c74dca239db162769ac30075",
+  "prompts": {},
+  "sessions": {
+    "s_7d25aa5b984683": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71aaa015-6a46-4cf4-9924-75716400660b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
