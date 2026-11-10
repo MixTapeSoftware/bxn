@@ -79,9 +79,11 @@ assert_eq "it's opt-in" "0" "$PLUGIN_DEFAULT"
 assert_eq "--botfight asks for it, as the old flag still does" "--botfight --mixtape-skills" "$PLUGIN_CLI_FLAGS"
 assert_eq "it needs no hosts beyond the baseline" "" "${PLUGIN_EGRESS_ALLOW:-}"
 assert_eq "its description has no colon" "no" "$([[ "$PLUGIN_DESC" == *:* ]] && echo yes || echo no)"
+# Plugins install in PLUGIN_NAME order, sorted as boxen.create sorts them.
 assert_eq "it installs after the agents it installs into" \
-  "40-claude-code.sh 50-codex.sh 55-botfight.sh" \
-  "$(cd "$REPO_ROOT/plugins" && ls | grep -E 'claude-code|codex|botfight' | tr '\n' ' ' | sed 's/ $//')"
+  "Claude Code|Codex|MixTape Botfight" \
+  "$(for f in "$REPO_ROOT"/plugins/*.sh; do (PLUGIN_NAME=""; source "$f" >/dev/null 2>&1; printf '%s\n' "$PLUGIN_NAME"); done |
+     sort -f -s | grep -E '^(Claude Code|Codex|MixTape Botfight)$' | paste -sd'|' -)"
 
 echo "Claude Code and Codex both"
 home_with claude codex

@@ -1,5 +1,5 @@
 PLUGIN_ID="botfight"
-PLUGIN_NAME="Botfight"
+PLUGIN_NAME="MixTape Botfight"
 PLUGIN_DESC="MixTape Software's unattended PR loop, as a plugin for Claude Code and Codex"
 PLUGIN_DEFAULT=0
 # --mixtape-skills is the flag from before the repository became botfight.
@@ -7,8 +7,11 @@ PLUGIN_CLI_FLAGS="--botfight --mixtape-skills"
 
 # Botfight is a Claude Code and a Codex plugin, from the marketplace its
 # repository holds (github.com, already on the egress baseline). It installs
-# into each of those agents the container has, so this file sorts after
-# theirs. Both CLIs' commands are safe to rerun.
+# into each of those agents the container has, so it must install after them.
+# Plugins install in PLUGIN_NAME order (A-Z), and the agents are plugins too:
+# "MixTape Botfight" sorts after "Claude Code" and "Codex", where a bare
+# "Botfight" would sort first and find no agent on a fresh build. Both CLIs'
+# commands are safe to rerun.
 #
 # The script finds the agents the instance user has. It runs from stdin, so
 # every command in it reads /dev/null instead.
