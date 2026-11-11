@@ -1,0 +1,33 @@
+plugins/50-fly.sh
+  s_ca93edf61f0d5e::t_cd013dc91dc3a8 1-14,18-77
+  s_ca93edf61f0d5e::t_860b42697ae3f5 15-17
+tests/fly_plugin_test.sh
+  s_ca93edf61f0d5e::t_819b3e90896ebb 98,286,295
+  s_ca93edf61f0d5e::t_b9808d89748596 85-86,91-95
+  s_ca93edf61f0d5e::t_b7edd507a6e296 184,186-188
+  s_ca93edf61f0d5e::t_731169b0954fb6 199-209
+  s_ca93edf61f0d5e::t_82b57e7972bb41 1-2,8-84,87-90,96-97,99-110,122-150,153-174,176-183,185,189-198,210-285,287-294,296-319
+  s_ca93edf61f0d5e::t_fdd6a6cb2f8491 151-152
+  s_ca93edf61f0d5e::t_569acd815309e1 3-7
+  s_ca93edf61f0d5e::t_d944a38cafd8c5 111-121
+  s_ca93edf61f0d5e::t_8deb6563c507b4 175
+README.md
+  s_ca93edf61f0d5e::t_e5a9895ae1812b 294,324
+  s_ca93edf61f0d5e::t_f863d2314fd29a 325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1e7888989ebe875ea5bce747af3264ec9a74f5d9",
+  "prompts": {},
+  "sessions": {
+    "s_ca93edf61f0d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e09a75c5-e2d1-4edd-baab-34535d2ad01f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
