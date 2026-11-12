@@ -306,6 +306,23 @@ assert_eq "copy fails: no partial binary where plugin_is_installed looks" "no" "
 assert_eq "copy fails: the partial staging file is removed" "gone" "$(staged)"
 assert_eq "copy fails: the temp directory is removed" "0" "$(leftovers)"
 
+# Over a working install: the copy goes to the staging file and only a whole
+# one is renamed into place, so the old binary and its link stay. On a fresh
+# box there's no link, so plugin_is_installed says no whether or not a partial
+# copy landed on flyctl; here it would say yes to one.
+fresh_box x86_64
+FLY_SHA256_X86_64="$FIXTURE_SUM"
+run_install
+assert_eq "upgrade, copy fails: the first install succeeds" "0" "$RC"
+touch "$SANDBOX/install-fail"
+run_install
+assert_eq "upgrade, copy fails: the plugin fails" "1" "$RC"
+assert_eq "upgrade, copy fails: the old binary stays" "$(cat "$FIXTURE_BIN")" "$(cat "$(bin)" 2>/dev/null)"
+assert_eq "upgrade, copy fails: fly still links to flyctl" "flyctl" "$(link)"
+assert_eq "upgrade, copy fails: plugin_is_installed still sees it" "yes" "$(installed)"
+assert_eq "upgrade, copy fails: the partial staging file is removed" "gone" "$(staged)"
+assert_eq "upgrade, copy fails: the temp directory is removed" "0" "$(leftovers)"
+
 # ===========================================================================
 echo "the instance can't be reached"
 # ===========================================================================
