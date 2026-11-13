@@ -1,0 +1,19 @@
+egress/baseline.txt
+  s_37533d6e1f1f9a::t_1cc9fca0205946 99-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c0097c09acddd2cee22ff52b073f8d99292df9d6",
+  "prompts": {},
+  "sessions": {
+    "s_37533d6e1f1f9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e2c83c87-fc7d-49c3-ac0e-53f9347b0aa6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
