@@ -96,6 +96,8 @@ golang.org
 pkg.go.dev
 goproxy.io
 hex.pm
+# Hex's Elixir and Erlang/OTP builds, for mix local.hex and version managers.
+builds.hex.pm
 packagist.org
 packagist.com
 # Packagist's repo and metadata mirrors.
