@@ -863,7 +863,7 @@ _reset_plugin_state() {
   PLUGIN_ID="" PLUGIN_NAME="" PLUGIN_DESC="" PLUGIN_DEFAULT=0
   PLUGIN_CLI_FLAGS="" PLUGIN_NEEDS_PROMPT=0 PLUGIN_RUN_ON_LAUNCH=0
   PLUGIN_REQUIRES="" PLUGIN_AGENT_COMMAND="" PLUGIN_PHASE="" PLUGIN_EGRESS_ALLOW="" PLUGIN_MIN_MEMORY=""
-  PLUGIN_LOGIN_COMMAND=""
+  PLUGIN_LOGIN_COMMAND="" PLUGIN_GROUP=""
   unset -f plugin_prompt plugin_is_installed plugin_install plugin_on_launch plugin_proxy 2>/dev/null || true
 }
 
