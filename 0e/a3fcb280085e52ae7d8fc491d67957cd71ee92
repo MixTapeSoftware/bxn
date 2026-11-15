@@ -1,0 +1,80 @@
+plugins/50-cubic.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/55-supabase-serve.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 7
+plugins/30-fzf-bat.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-glow.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/60-1pass.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-chadmux.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-tailscale.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-overmind.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/60-gh-auth.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-nvchad.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+boxen.create
+  s_23410503161b61::t_568dbf5a33764b 508
+  s_23410503161b61::t_490cf3405ac867 436
+  s_23410503161b61::t_13fc947835b281 320
+  s_23410503161b61::t_67f089ccbe3bbe 481
+  s_23410503161b61::t_37dae9898c0a91 516,524,532-533
+  s_23410503161b61::t_3cb945b4e4f45f 468
+  s_23410503161b61::t_2252feef3cd060 702-748,750,752,754-756
+  s_23410503161b61::t_d2d6bfc4b2891f 775-776,778
+  s_23410503161b61::t_809b8f28a1f015 450,452,454-455
+  s_23410503161b61::t_f70ad5d90eaf86 777
+  s_23410503161b61::t_32c971c9684c05 493
+tests/create_pickers_test.sh
+  s_23410503161b61::t_7b581c0e9dec87 158
+  s_23410503161b61::t_47ed0a0c19a485 134,139-157,159-181
+  s_23410503161b61::t_2d1c936b5f6712 182
+plugins/55-botfight.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-rtkplus.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-obsidian.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-mermaid-ascii.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+bxn.new-plugin
+  s_23410503161b61::t_b4217c1bf0ceca 114
+README.md
+  s_23410503161b61::t_a4ccc54f69d5a1 372
+  s_23410503161b61::t_e284c03812933e 388
+plugins/10-docker.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-just.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/45-vibe-wise.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-matt-pocock-skills.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-lazygit.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/20-chromium.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+plugins/50-fly.sh
+  s_23410503161b61::t_4dec9bb97ffe7b 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0ea3fcb280085e52ae7d8fc491d67957cd71ee92",
+  "prompts": {},
+  "sessions": {
+    "s_23410503161b61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66f1fd10-3bba-4bd4-b66b-fd776771de09",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
