@@ -131,9 +131,54 @@ if command -v script >/dev/null 2>&1 && script -qec true /dev/null >/dev/null 2>
   assert_contains "the plugin picker was up" "Select plugins to install" "$(plain <<< "$out")"
   back="$(cursor_back "$out")"
   assert_eq "Ctrl-C in the plugin picker: the cursor is shown again" "yes" "$back"
+  assert_eq "its one plugin names no group: no heading over it" "0" "$(plain <<< "$out" | grep -cx '  Other' || true)"
 else
   echo "  skip: needs util-linux script(1)"
 fi
+
+# ===========================================================================
+echo "the plugin picker's groups"
+# ===========================================================================
+# Aardvark sorts first by name, but its group comes after Zed's; Mine names a
+# group Boxen doesn't list, and Tool names none.
+cat > "$SANDBOX/repo/plugins/50-zed.sh" <<'EOF'
+PLUGIN_ID="zed"; PLUGIN_NAME="Zed"; PLUGIN_DESC="x"; PLUGIN_GROUP="Build & run"; PLUGIN_CLI_FLAGS="--zed"
+plugin_install() { echo zed >> "$FAKE_INCUS_STATE/installed"; }
+EOF
+cat > "$SANDBOX/repo/plugins/50-aardvark.sh" <<'EOF'
+PLUGIN_ID="aardvark"; PLUGIN_NAME="Aardvark"; PLUGIN_DESC="x"; PLUGIN_GROUP="Notes & docs"; PLUGIN_CLI_FLAGS="--aardvark"
+plugin_install() { echo aardvark >> "$FAKE_INCUS_STATE/installed"; }
+EOF
+cat > "$SANDBOX/repo/plugins/50-mine.sh" <<'EOF'
+PLUGIN_ID="mine"; PLUGIN_NAME="Mine"; PLUGIN_DESC="x"; PLUGIN_GROUP="My own"
+plugin_install() { :; }
+EOF
+# The picker's last screen, as headings and "[x] Name" rows joined by |.
+picker_screen() {
+  plain < "$1" | awk '/Select plugins to install/{s=""; on=1} on && /^\[\+\]/{exit} {s=s $0 "\n"} END{printf "%s", s}' |
+    grep -E '^  [^ ]|^   \[' | sed -E 's/^   (\[.\]) ([^ ]+).*/\1 \2/' | paste -sd'|' -
+}
+if command -v script >/dev/null 2>&1 && script -qec true /dev/null >/dev/null 2>&1; then
+  # Enter takes the agent; Space ticks the first plugin shown, then Enter.
+  fresh
+  { sleep 1.5; printf '\n'; sleep 1; printf ' '; sleep 0.5; printf '\n'; sleep 2; } |
+    TERM=xterm timeout 60 script -qec "bash '$SANDBOX/repo/boxen.create' web --dry-run -p '$SANDBOX/ws'" /dev/null \
+    > "$SANDBOX/tui.out" 2>&1 || true
+  assert_eq "under headings: Boxen's groups in order, then others, then Other" \
+    "  Build & run|[x] Zed|  Notes & docs|[ ] Aardvark|  My own|[ ] Mine|  Other|[x] Tool" \
+    "$(picker_screen "$SANDBOX/tui.out")"
+  out="$(plain < "$SANDBOX/tui.out")"
+  assert_contains "Space ticked the plugin under the cursor, the first shown" "[x] Zed" "$out"
+  assert_contains "…not the first by name" "[ ] Aardvark" "$out"
+else
+  echo "  skip: needs util-linux script(1)"
+fi
+
+fresh
+create --name g --no-tui --egress off --zed --aardvark </dev/null
+assert_eq "the groups don't change the install order: A-Z by name" "aardvark
+zed" "$(cat "$FAKE_INCUS_STATE/installed" 2>/dev/null)"
+rm -f "$SANDBOX/repo/plugins/50-zed.sh" "$SANDBOX/repo/plugins/50-aardvark.sh" "$SANDBOX/repo/plugins/50-mine.sh"
 
 # ===========================================================================
 echo "a dry run on macOS"

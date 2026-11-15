@@ -1,6 +1,7 @@
 PLUGIN_ID="mermaid-ascii"
 PLUGIN_NAME="mermaid-ascii"
 PLUGIN_DESC="Render mermaid diagrams as ASCII art"
+PLUGIN_GROUP="Notes & docs"
 PLUGIN_DEFAULT=0
 
 # Pinned release. Bump to re-pin. Asset naming verified 2026-07-18:

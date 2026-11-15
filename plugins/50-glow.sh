@@ -1,6 +1,7 @@
 PLUGIN_ID="glow"
 PLUGIN_NAME="Glow"
 PLUGIN_DESC="Terminal markdown viewer"
+PLUGIN_GROUP="Notes & docs"
 PLUGIN_DEFAULT=0
 # Its apt repository, for updates under an allowlist.
 PLUGIN_EGRESS_ALLOW="repo.charm.sh"

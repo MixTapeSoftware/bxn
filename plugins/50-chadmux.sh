@@ -1,6 +1,7 @@
 PLUGIN_ID="chadmux"
 PLUGIN_NAME="Chadmux"
 PLUGIN_DESC="Chad's tmux config + TPM plugins (dracula, yank, vim-tmux-navigator)"
+PLUGIN_GROUP="Terminal & editor"
 PLUGIN_DEFAULT=0
 
 plugin_is_installed() {

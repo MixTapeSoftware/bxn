@@ -1,6 +1,7 @@
 PLUGIN_ID="docker"
 PLUGIN_NAME="Docker"
 PLUGIN_DESC="Container runtime & compose (the docker group is root inside the container)"
+PLUGIN_GROUP="Build & run"
 # Off by default: the docker group is root inside the container. Opt in with
 # --docker.
 PLUGIN_DEFAULT=0

@@ -1,6 +1,7 @@
 PLUGIN_ID="fzf-bat"
 PLUGIN_NAME="fzf + bat"
 PLUGIN_DESC="Interactive search & file preview"
+PLUGIN_GROUP="Terminal & editor"
 PLUGIN_DEFAULT=0
 
 plugin_is_installed() {

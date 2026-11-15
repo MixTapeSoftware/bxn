@@ -1,6 +1,7 @@
 PLUGIN_ID="rtkplus"
 PLUGIN_NAME="rtk"
 PLUGIN_DESC="AI coding agent toolkit"
+PLUGIN_GROUP="Agent add-ons"
 PLUGIN_DEFAULT=0
 PLUGIN_NEEDS_PROMPT=1
 

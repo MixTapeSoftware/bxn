@@ -369,6 +369,7 @@ plugin_install() {
 ```
 
 Optional extras:
+- `PLUGIN_GROUP="Build & run"` — the heading the plugin picker lists it under. Boxen's groups come first, in this order: Agent add-ons, Build & run, Terminal & editor, Notes & docs, Access & networking. A group of your own comes after them (A-Z), and a plugin with no group comes last, under Other. When no plugin names a group, the picker shows no headings
 - `PLUGIN_AGENT_COMMAND="my-agent"` — identifies a coding agent; enables `--agent my-agent` and launch guidance
 - `PLUGIN_CLI_FLAGS="--my-tool"` — adds a CLI flag to pre-select without the TUI
 - `PLUGIN_NEEDS_PROMPT=1` + `plugin_prompt()` — collect user input before install. The install hooks themselves run with stdin from `/dev/null`, so Ctrl-C stops the build rather than only the command inside the container; a hook that exits 130 stops it too
@@ -384,7 +385,7 @@ Optional extras:
 
 #### How discovery works
 
-Plugin files are sourced in a **separate bash process** to safely extract metadata without executing install logic. The metadata (ID, name, description, default, CLI flags) is stashed into parallel arrays that the TUI and arg parser use. `plugins/` (or, with a plugin source, its agents and the source's plugins) and `~/.local/share/boxen/plugins/` are scanned; entries are then sorted A-Z by `PLUGIN_NAME` (case-insensitive), which drives both TUI display order and install order. During install, each plugin file is sourced into the main process so its functions have access to globals like `$CONTAINER_NAME` and `$HOST_USER`.
+Plugin files are sourced in a **separate bash process** to safely extract metadata without executing install logic. The metadata (ID, name, description, default, CLI flags) is stashed into parallel arrays that the TUI and arg parser use. `plugins/` (or, with a plugin source, its agents and the source's plugins) and `~/.local/share/boxen/plugins/` are scanned; entries are then sorted A-Z by `PLUGIN_NAME` (case-insensitive), which is the install order. The picker shows them by group (`PLUGIN_GROUP`), A-Z within each; that changes only what you see, not the order they install in. During install, each plugin file is sourced into the main process so its functions have access to globals like `$CONTAINER_NAME` and `$HOST_USER`.
 
 ## The Development Workflow
 

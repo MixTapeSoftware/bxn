@@ -1,6 +1,7 @@
 PLUGIN_ID="lazygit"
 PLUGIN_NAME="lazygit"
 PLUGIN_DESC="Terminal UI for git"
+PLUGIN_GROUP="Terminal & editor"
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--lazygit"
 # No PLUGIN_EGRESS_ALLOW: the download is from github.com, which redirects to

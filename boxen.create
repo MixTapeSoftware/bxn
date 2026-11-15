@@ -317,6 +317,7 @@ if [[ -n "$PLUGINS_SOURCE" ]]; then plugins_source_fetch "$PLUGINS_SOURCE"; fi
 
 # Parallel arrays (bash 3.2 compatible — macOS /bin/bash has no associative arrays)
 _P_ID=() _P_NAME=() _P_DESC=() _P_FILE=() _P_SELECTED=() _P_AGENT_COMMAND=()
+_P_GROUP=()                # PLUGIN_GROUP: the picker's heading, empty for none
 _P_CLI_FLAGS=()            # effective metadata after user overrides
 _P_FLAGS=() _P_FLAG_IDS=()   # parallel: _P_FLAGS[i] -> _P_FLAG_IDS[i]
 PLUGIN_COUNT=0
@@ -432,7 +433,7 @@ print_plugin_logins() {
 # again when the first create picks a plugin source (ask_plugins_source).
 discover_plugins() {
   _P_ID=() _P_NAME=() _P_DESC=() _P_FILE=() _P_SELECTED=() _P_AGENT_COMMAND=()
-  _P_CLI_FLAGS=() _P_FLAGS=() _P_FLAG_IDS=()
+  _P_GROUP=() _P_CLI_FLAGS=() _P_FLAGS=() _P_FLAG_IDS=()
   PLUGIN_COUNT=0
   AGENT_DEFAULT_SLOT=-1
   # Discover built-in plugins first, then the plugin source's, then user plugins.
@@ -446,11 +447,12 @@ discover_plugins() {
       _meta=$(bash -c '
         PLUGIN_ID="" PLUGIN_NAME="" PLUGIN_DESC="" PLUGIN_DEFAULT=0
         PLUGIN_CLI_FLAGS="" PLUGIN_NEEDS_PROMPT=0 PLUGIN_RUN_ON_LAUNCH=0
-        PLUGIN_AGENT_COMMAND=""
+        PLUGIN_AGENT_COMMAND="" PLUGIN_GROUP=""
         source "$1" 2>/dev/null
-        printf "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n" \
+        printf "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n" \
           "$PLUGIN_ID" "$PLUGIN_NAME" "$PLUGIN_DESC" "$PLUGIN_DEFAULT" \
-          "$PLUGIN_CLI_FLAGS" "$PLUGIN_NEEDS_PROMPT" "$PLUGIN_RUN_ON_LAUNCH" "$PLUGIN_AGENT_COMMAND"
+          "$PLUGIN_CLI_FLAGS" "$PLUGIN_NEEDS_PROMPT" "$PLUGIN_RUN_ON_LAUNCH" "$PLUGIN_AGENT_COMMAND" \
+          "$PLUGIN_GROUP"
       ' _ "$_f")
 
       # Read one field per line so empty optional values keep their position.
@@ -463,6 +465,7 @@ discover_plugins() {
         IFS= read -r _pprompt
         IFS= read -r _plaunch
         IFS= read -r _pagent || true
+        IFS= read -r _pgroup || true
       } <<< "$_meta"
       [[ -z "$_pid" ]] && continue
       # The source replaces our optional plugins, not the agents.
@@ -475,6 +478,7 @@ discover_plugins() {
         _P_FILE[$_existing]="$_f"
         _P_SELECTED[$_existing]="${_pdefault:-0}"
         _P_AGENT_COMMAND[$_existing]="$_pagent"
+        _P_GROUP[$_existing]="$_pgroup"
         _P_CLI_FLAGS[$_existing]="$_pcli"
         continue
       fi
@@ -486,6 +490,7 @@ discover_plugins() {
       _P_FILE[$_i]="$_f"
       _P_SELECTED[$_i]="${_pdefault:-0}"
       _P_AGENT_COMMAND[$_i]="$_pagent"
+      _P_GROUP[$_i]="$_pgroup"
       _P_CLI_FLAGS[$_i]="$_pcli"
 
       PLUGIN_COUNT=$((_i + 1))
@@ -500,7 +505,7 @@ discover_plugins() {
     done
   done
   unset _P_CLI_FLAGS
-  unset _dir _f _meta _i _pid _pname _pdesc _pdefault _pcli _pprompt _plaunch _pagent _flag _existing
+  unset _dir _f _meta _i _pid _pname _pdesc _pdefault _pcli _pprompt _plaunch _pagent _pgroup _flag _existing
 
   # Sort plugins by PLUGIN_NAME, case-insensitive A-Z (stable).
   if (( PLUGIN_COUNT > 1 )); then
@@ -508,7 +513,7 @@ discover_plugins() {
     for ((_i=0; _i<PLUGIN_COUNT; _i++)); do
       _sort_lines+="${_P_NAME[$_i]}"$'\t'"$_i"$'\n'
     done
-    _new_ID=() _new_NAME=() _new_DESC=() _new_FILE=() _new_SELECTED=() _new_AGENT_COMMAND=()
+    _new_ID=() _new_NAME=() _new_DESC=() _new_FILE=() _new_SELECTED=() _new_AGENT_COMMAND=() _new_GROUP=()
     while IFS=$'\t' read -r _name _slot; do
       _new_ID+=("${_P_ID[$_slot]}")
       _new_NAME+=("${_P_NAME[$_slot]}")
@@ -516,6 +521,7 @@ discover_plugins() {
       _new_FILE+=("${_P_FILE[$_slot]}")
       _new_SELECTED+=("${_P_SELECTED[$_slot]}")
       _new_AGENT_COMMAND+=("${_P_AGENT_COMMAND[$_slot]}")
+      _new_GROUP+=("${_P_GROUP[$_slot]}")
     done < <(printf '%s' "$_sort_lines" | sort -f -s -t$'\t' -k1,1)
     _P_ID=("${_new_ID[@]}")
     _P_NAME=("${_new_NAME[@]}")
@@ -523,7 +529,8 @@ discover_plugins() {
     _P_FILE=("${_new_FILE[@]}")
     _P_SELECTED=("${_new_SELECTED[@]}")
     _P_AGENT_COMMAND=("${_new_AGENT_COMMAND[@]}")
-    unset _new_ID _new_NAME _new_DESC _new_FILE _new_SELECTED _new_AGENT_COMMAND _sort_lines _name _slot _i
+    _P_GROUP=("${_new_GROUP[@]}")
+    unset _new_ID _new_NAME _new_DESC _new_FILE _new_SELECTED _new_AGENT_COMMAND _new_GROUP _sort_lines _name _slot _i
   fi
 
   # Agents aren't preselected like plugins: one marked default only places the
@@ -692,13 +699,61 @@ ask_plugins_source() {
   done
 }
 
-# The plugin picker. Agents have their own picker, so they aren't listed.
-show_tui() {
-  local rows=() cursor=0 i slot
-  local key seq marker id name desc default
-  for ((i=0; i<${#PLUGINS[@]}; i++)); do
-    [[ -n "${_P_AGENT_COMMAND[$i]}" ]] || rows+=("$i")
+# The plugin picker's groups, in the order it shows them. A plugin names its
+# group with PLUGIN_GROUP. One naming a group not listed here comes after
+# these, A-Z by group; one naming none comes last, under Other.
+PLUGIN_GROUP_ORDER=("Agent add-ons" "Build & run" "Terminal & editor" "Notes & docs" "Access & networking")
+
+# Usage: _in_list <word> [<item>...]; true when the word is one of the items.
+_in_list() {
+  local want="$1" item
+  shift
+  for item in "$@"; do [[ "$item" == "$want" ]] && return 0; done
+  return 1
+}
+
+# Sets PICKER_ROWS to the optional plugins' slots in the picker's order: by
+# group, and within one A-Z by name, as discovery sorted them. Sets
+# PICKER_HEADINGS, row for row, to the group's name on the first row of each
+# group and empty on the rest. When every plugin is under Other there are no
+# headings, so a source whose plugins name no group is listed as before.
+# Only the picker's order: plugins still install in discovery's A-Z order.
+plugin_picker_rows() {
+  local groups=() extras=() g i heading
+  PICKER_ROWS=() PICKER_HEADINGS=()
+  for ((i=0; i<PLUGIN_COUNT; i++)); do
+    [[ -z "${_P_AGENT_COMMAND[$i]}" ]] || continue
+    g="${_P_GROUP[$i]:-Other}"
+    [[ "$g" != Other ]] || continue
+    _in_list "$g" "${PLUGIN_GROUP_ORDER[@]}" ${extras[@]+"${extras[@]}"} || extras+=("$g")
   done
+  groups=("${PLUGIN_GROUP_ORDER[@]}")
+  if (( ${#extras[@]} > 0 )); then
+    while IFS= read -r g; do groups+=("$g"); done < <(printf '%s\n' "${extras[@]}" | sort -f)
+  fi
+  groups+=(Other)
+  for g in "${groups[@]}"; do
+    heading="$g"
+    for ((i=0; i<PLUGIN_COUNT; i++)); do
+      [[ -z "${_P_AGENT_COMMAND[$i]}" && "${_P_GROUP[$i]:-Other}" == "$g" ]] || continue
+      PICKER_ROWS+=("$i")
+      PICKER_HEADINGS+=("$heading")
+      heading=""
+    done
+  done
+  if (( ${#PICKER_ROWS[@]} > 0 )) && [[ "${PICKER_HEADINGS[0]}" == Other ]]; then
+    PICKER_HEADINGS[0]=""
+  fi
+}
+
+# The plugin picker. Agents have their own picker, so they aren't listed.
+# The cursor moves over plugins only; headings are passed over.
+show_tui() {
+  local rows=() headings=() cursor=0 i slot
+  local key seq marker id name desc default
+  plugin_picker_rows
+  rows=(${PICKER_ROWS[@]+"${PICKER_ROWS[@]}"})
+  headings=(${PICKER_HEADINGS[@]+"${PICKER_HEADINGS[@]}"})
   local count=${#rows[@]}
   (( count > 0 )) || return 0
 
@@ -717,6 +772,10 @@ show_tui() {
 
     for ((i=0; i<count; i++)); do
       slot=${rows[$i]}
+      if [[ -n "${headings[$i]}" ]]; then
+        (( i == 0 )) || echo ""
+        printf '  %b%s%b\n' "$GREEN" "${headings[$i]}" "$NC"
+      fi
       IFS=: read -r id name desc default <<< "${PLUGINS[$slot]}"
       marker="[ ]"
       [[ "${_P_SELECTED[$slot]}" == "1" ]] && marker="[x]"

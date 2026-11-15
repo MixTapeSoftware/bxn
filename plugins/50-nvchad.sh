@@ -1,6 +1,7 @@
 PLUGIN_ID="nvchad"
 PLUGIN_NAME="Chadception"
 PLUGIN_DESC="Chad's nvChad"
+PLUGIN_GROUP="Terminal & editor"
 PLUGIN_DEFAULT=0
 
 plugin_is_installed() {

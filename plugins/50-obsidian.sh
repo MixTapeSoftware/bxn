@@ -1,6 +1,7 @@
 PLUGIN_ID="obsidian"
 PLUGIN_NAME="Obsidian Headless"
 PLUGIN_DESC="Obsidian Sync and Publish from the command line (ob)"
+PLUGIN_GROUP="Notes & docs"
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--obsidian"
 # Obsidian's API (api), Publish (publish, and the host a site is served from)
