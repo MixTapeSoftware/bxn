@@ -1,0 +1,19 @@
+README.md
+  s_23410503161b61::t_43cea60470c3bb 3-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3f5373058f41260036e7bd70ac132ee98be8cc88",
+  "prompts": {},
+  "sessions": {
+    "s_23410503161b61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66f1fd10-3bba-4bd4-b66b-fd776771de09",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
