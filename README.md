@@ -1,6 +1,10 @@
 # Boxen
 
-A set of shell scripts that automate the creation of [Incus](https://linuxcontainers.org/incus/) containers and VMs for coding agents, including Claude Code, Codex, and Grok Build. See COI's [Why Incus](https://github.com/mensfeld/code-on-incus?tab=readme-ov-file#why-incus-over-docker) for why Incus over Docker.
+Boxen builds robust, isolated development environments on [Incus](https://linuxcontainers.org/incus/): full machines to work in yourself, alongside sealed environments for coding agents such as Claude Code, Codex and Grok Build.
+
+Why Incus? Incus is the Linux Containers project's community fork of LXD, and its containers are built on LXC. These are open-source, battle-tested projects that have run production workloads for over a decade, and Boxen stands on their shoulders. Incus makes system containers. A Docker container usually runs a single process, but an Incus container boots a whole Linux system with systemd and its services, and it can run Docker itself. That makes it more fully featured than a Docker container: it's a development machine, not a wrapper around one program.
+
+For kernel-level isolation, Boxen uses Incus's KVM virtual machines, which are its default. Each VM runs its own kernel, so anything that breaks out of the guest still has to get through the hypervisor. `--container` gives you a system container instead. [SANDBOX.md](SANDBOX.md) covers what each one stops and what it doesn't.
 
 Why shell scripts? They introduce no dependencies, are ergonomic enough for simple systems administration tasks, and transparently convey their purpose.
 
