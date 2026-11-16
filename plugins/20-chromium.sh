@@ -1,6 +1,7 @@
 PLUGIN_ID="chromium"
 PLUGIN_NAME="Chromium/Playwright"
 PLUGIN_DESC="Headless browser for testing"
+PLUGIN_GROUP="Build & run"
 PLUGIN_DEFAULT=0
 PLUGIN_RUN_ON_LAUNCH=1
 

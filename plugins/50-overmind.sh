@@ -1,6 +1,7 @@
 PLUGIN_ID="overmind"
 PLUGIN_NAME="Overmind"
 PLUGIN_DESC="Procfile-based process manager (installs go)"
+PLUGIN_GROUP="Build & run"
 PLUGIN_DEFAULT=0
 
 plugin_is_installed() {

@@ -1,6 +1,7 @@
 PLUGIN_ID="fly"
 PLUGIN_NAME="Fly CLI"
 PLUGIN_DESC="flyctl, the command line for Fly.io (fly)"
+PLUGIN_GROUP="Build & run"
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--fly --flyctl"
 # What flyctl reaches for apps, Machines and deploys:

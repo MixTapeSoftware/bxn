@@ -1,6 +1,7 @@
 PLUGIN_ID="cubic"
 PLUGIN_NAME="cubic"
 PLUGIN_DESC="AI code review CLI (cubic.dev)"
+PLUGIN_GROUP="Agent add-ons"
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--cubic"
 

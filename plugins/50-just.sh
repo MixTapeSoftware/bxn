@@ -1,6 +1,7 @@
 PLUGIN_ID="just"
 PLUGIN_NAME="just"
 PLUGIN_DESC="Command runner for project tasks"
+PLUGIN_GROUP="Build & run"
 PLUGIN_DEFAULT=0
 
 plugin_is_installed() {

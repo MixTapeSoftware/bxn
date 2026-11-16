@@ -4,6 +4,7 @@ PLUGIN_ID="supabase-serve"
 # the name — the TUI's PLUGINS entries are colon-delimited.
 PLUGIN_NAME="Tailscale + Supabase serve"
 PLUGIN_DESC="Serve app + Supabase ports over tailnet HTTPS"
+PLUGIN_GROUP="Access & networking"
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--supabase-serve"
 PLUGIN_REQUIRES="tailscale"

@@ -1,6 +1,7 @@
 PLUGIN_ID="1pass"
 PLUGIN_NAME="1Password CLI"
 PLUGIN_DESC="Password manager CLI"
+PLUGIN_GROUP="Access & networking"
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--1pass"
 PLUGIN_NEEDS_PROMPT=1

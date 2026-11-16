@@ -1,6 +1,7 @@
 PLUGIN_ID="gh-auth"
 PLUGIN_NAME="GitHub Auth"
 PLUGIN_DESC="GitHub token & git credentials"
+PLUGIN_GROUP="Access & networking"
 # The git identity (user.name, user.email) is set for every container by
 # boxen.create, from the host; this plugin only handles the token.
 PLUGIN_DEFAULT=0

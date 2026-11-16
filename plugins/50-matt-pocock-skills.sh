@@ -1,6 +1,7 @@
 PLUGIN_ID="matt-pocock-skills"
 PLUGIN_NAME="Matt Pocock Skills"
 PLUGIN_DESC="Engineering and productivity skills for Claude Code, Codex, and Grok"
+PLUGIN_GROUP="Agent add-ons"
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--matt-pocock-skills"
 

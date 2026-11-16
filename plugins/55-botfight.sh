@@ -1,6 +1,7 @@
 PLUGIN_ID="botfight"
 PLUGIN_NAME="MixTape Botfight"
 PLUGIN_DESC="MixTape Software's unattended PR loop, as a plugin for Claude Code and Codex"
+PLUGIN_GROUP="Agent add-ons"
 PLUGIN_DEFAULT=0
 # --mixtape-skills is the flag from before the repository became botfight.
 PLUGIN_CLI_FLAGS="--botfight --mixtape-skills"

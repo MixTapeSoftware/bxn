@@ -1,6 +1,7 @@
 PLUGIN_ID="tailscale"
 PLUGIN_NAME="Tailscale"
 PLUGIN_DESC="Tailscale VPN for tailnet access inside the container"
+PLUGIN_GROUP="Access & networking"
 PLUGIN_DEFAULT=0
 PLUGIN_CLI_FLAGS="--tailscale"
 PLUGIN_NEEDS_PROMPT=1
