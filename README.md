@@ -6,6 +6,8 @@ Why Incus? Incus is the Linux Containers project's community fork of LXD, and it
 
 For kernel-level isolation, Boxen uses Incus's KVM virtual machines, which are its default. Each VM runs its own kernel, so anything that breaks out of the guest still has to get through the hypervisor. `--container` gives you a system container instead. [SANDBOX.md](SANDBOX.md) covers what each one stops and what it doesn't.
 
+For the network, Boxen builds on Stripe's [Smokescreen](https://github.com/stripe/smokescreen), the egress proxy Stripe built to control its own outbound traffic, and we stand on their shoulders too. Each environment reaches the internet only through its own Smokescreen proxy, which lets through only the hosts on its allowlist. Boxen adds one check of its own: an HTTPS connection has to name the host it asked for. See [Egress Allowlist](#egress-allowlist).
+
 Why shell scripts? They introduce no dependencies, are ergonomic enough for simple systems administration tasks, and transparently convey their purpose.
 
 ## Contents
