@@ -200,7 +200,9 @@ bxn_skill_install() {
   local agent failed=""
   for agent in $1; do
     if [[ "$agent" == claude ]]; then
-      claude plugin install bxn --marketplace "$BXN_SKILL_MARKETPLACE" </dev/null || failed="${failed:+$failed }claude"
+      # Two steps, not install --marketplace, which older Claude Code lacks.
+      { claude plugin marketplace add "$BXN_SKILL_MARKETPLACE" && claude plugin install bxn@bxn; } </dev/null ||
+        failed="${failed:+$failed }claude"
     else
       { codex plugin marketplace add "$BXN_SKILL_MARKETPLACE" && codex plugin add bxn@bxn; } </dev/null ||
         failed="${failed:+$failed }codex"

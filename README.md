@@ -67,14 +67,14 @@ To install it yourself instead, in Claude Code:
 /plugin install bxn --marketplace MixTapeSoftware/bxn
 ```
 
-On Claude Code older than 2.1.275, add the marketplace first: `/plugin marketplace add MixTapeSoftware/bxn`, then `/plugin install bxn@bxn`. In Codex:
+If your Claude Code doesn't accept `--marketplace`, add the marketplace first: `/plugin marketplace add MixTapeSoftware/bxn`, then `/plugin install bxn@bxn`. In Codex:
 
 ```bash
 codex plugin marketplace add MixTapeSoftware/bxn
 codex plugin add bxn@bxn
 ```
 
-Pull new versions with `/plugin marketplace update bxn` in Claude Code, or `codex plugin marketplace upgrade bxn`.
+To pull a new version into Claude Code, refresh the marketplace, then the plugin: `claude plugin marketplace update bxn`, then `claude plugin update bxn@bxn`, and restart Claude Code. Turning on auto-update for the marketplace in `/plugin` does both for you. In Codex, run `codex plugin marketplace upgrade bxn`.
 
 ## Quick Start
 

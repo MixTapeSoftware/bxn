@@ -18,7 +18,7 @@ bxn runs on the host and manages boxes: Incus VMs or system containers, each wit
 | Path | Decided by | Ports |
 |---|---|---|
 | Inside the box (localhost) | nothing | any |
-| Box → public internet | the box's egress allowlist, by hostname | 80 and 443 under `enforce` and `report`; any port with `mode off` |
+| Box → public internet | under `enforce`, the box's egress allowlist, by hostname; `report` lets every public host through and only logs what `enforce` would block | 80 and 443 under `enforce` and `report`; any port with `mode off` |
 | Box → private or LAN address, the host, another box | network isolation | blocked in every egress mode; only a box built with `--insecure-network` gets through |
 | Box → a device on the user's tailnet (box has the Tailscale plugin) | the tailnet policy for the box's tag | whatever the policy grants |
 | Tailnet → box, through `bxn serve <box> <port>` | the tailnet policy | whatever the policy allows to the box's tag |

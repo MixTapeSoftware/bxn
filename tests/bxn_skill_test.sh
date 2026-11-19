@@ -96,7 +96,8 @@ refute_contains "and says nothing about it" "bxn skill" "$out"
 echo "install_shortcuts --bxn-skill"
 out="$(run both --bxn-skill)"
 assert_eq "it installs the plugin into both agents" \
-  "claude plugin install bxn --marketplace MixTapeSoftware/bxn
+  "claude plugin marketplace add MixTapeSoftware/bxn
+claude plugin install bxn@bxn
 codex plugin marketplace add MixTapeSoftware/bxn
 codex plugin add bxn@bxn" "$(calls)"
 assert_contains "and says so" "Installed the bxn skill for: claude codex" "$out"
@@ -119,7 +120,9 @@ assert_contains "it says which one" "The bxn skill didn't install for: claude" "
 assert_eq "and the other still gets it" "yes" "$([[ -f "$fixture/home/codex-has-bxn" ]] && echo yes || echo no)"
 fresh
 out="$(run claude-only --bxn-skill)"
-assert_eq "with only Claude Code, only it is asked" "claude plugin install bxn --marketplace MixTapeSoftware/bxn" "$(calls)"
+assert_eq "with only Claude Code, only it is asked" \
+  "claude plugin marketplace add MixTapeSoftware/bxn
+claude plugin install bxn@bxn" "$(calls)"
 out="$(run none --bxn-skill)"
 assert_eq "with neither agent, nothing runs" "" "$(calls)"
 assert_contains "and it says why" "this host has neither" "$out"
