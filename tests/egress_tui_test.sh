@@ -189,10 +189,15 @@ assert_contains "and says so" "Nothing changed" "$(last_frame "$out" | plain)"
 out=$(keys '\t' l j j b y | tui) || true
 assert_eq "y takes a baseline host off this container's list only" "rm box api.anthropic.com" "$(cat "$S/egress-calls" 2>/dev/null)"
 assert_contains "the result is shown" "box: done" "$(last_frame "$out" | plain)"
-printf '*.anthropic.com\tbaseline\napi.anthropic.com\tbox\n' > "$S/rules"
+printf '*.anthropic.com\tbaseline\n' > "$S/rules"
 out=$(keys '\t' l j j b y | KEEP_RULES=1 tui) || true
 assert_contains "a host a wildcard allows names the wildcard instead of asking" \
-  "api.anthropic.com is allowed through *.anthropic.com (baseline); to block it, remove that: bxn egress rm box '*.anthropic.com'" "$(last_frame "$out" | plain)"
+  "api.anthropic.com is allowed through *.anthropic.com (baseline); to block it, remove that: bxn egress rm box '*.anthropic.com'" "$(plain <<<"$out")"
+assert_eq "and y changes nothing" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+printf '*.com\tbox\n*.anthropic.com\tbaseline\napi.anthropic.com\tbox\n' > "$S/rules"
+out=$(keys '\t' l j j b y | KEEP_RULES=1 tui) || true
+assert_contains "with more than one entry, it names them all, the nearest wildcard first" \
+  "api.anthropic.com is allowed through *.anthropic.com (baseline), *.com (box), api.anthropic.com (box); to block it, remove them all: bxn egress rm box '*.anthropic.com' '*.com' 'api.anthropic.com'" "$(plain <<<"$out")"
 assert_eq "and y changes nothing" "" "$(cat "$S/egress-calls" 2>/dev/null)"
 touch "$S/ls-fails"
 out=$(keys '\t' l j j b y | tui) || true

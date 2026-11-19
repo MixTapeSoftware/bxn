@@ -935,14 +935,14 @@ status_busy_except_stop() {
   return 1
 }
 
-# How a container's list lets it reach <host>: the entry, a tab, and where it
-# comes from, read from `bxn egress ls --tsv` output. Fails when nothing on the
-# list matches. A wildcard is named before the host's own entry: while one
-# covers the host, taking the host's entry off leaves it reachable. A leading
-# "*." matches subdomains only, as in the proxy.
+# Every entry on a container's list that lets it reach <host>, one per line:
+# the entry, a tab, and where it comes from, read from `bxn egress ls --tsv`
+# output. Fails when none does. Wildcards come first, the nearest the host
+# first, then the host's own entry: the host stays reachable until all of them
+# are off. A leading "*." matches subdomains only, as in the proxy.
 # Usage: status_reach <tsv> <host>
 status_reach() {
-  local h src exact="" d="$2"
+  local h src exact="" d="$2" any=false
   while IFS=$'\t' read -r h src; do
     if [[ "$h" == "$2" ]]; then exact="$h"$'\t'"$src"; fi
   done <<<"$1"
@@ -951,12 +951,15 @@ status_reach() {
     while IFS=$'\t' read -r h src; do
       if [[ "$h" == "*.$d" ]]; then
         printf '%s\t%s\n' "$h" "$src"
-        return 0
+        any=true
       fi
     done <<<"$1"
   done
-  [[ -n "$exact" ]] || return 1
-  printf '%s\n' "$exact"
+  if [[ -n "$exact" ]]; then
+    printf '%s\n' "$exact"
+    any=true
+  fi
+  [[ $any == true ]]
 }
 
 # Starts an egress change as a background job, like start and stop, for the
@@ -1162,7 +1165,7 @@ status_answer() {
 }
 
 status_key() {
-  local key="$1" name r line verb why entry from
+  local key="$1" name r line verb why entry from seen cmd n
   case "$key" in
     q | Q) leave=true ;;
     esc) if [[ $focus == info ]]; then focus=list; else leave=true; fi ;;
@@ -1207,17 +1210,23 @@ status_key() {
           msg=$(tui_note "$msg" "Could not read $name's hosts; nothing changed")
         elif ! line=$(status_reach "$line" "$r"); then
           msg=$(tui_note "$msg" "$r isn't on $name's list; there's nothing to block")
+        elif [[ "$line" != *$'\n'* && "${line%%$'\t'*}" == "$r" ]]; then
+          # Only its own entry lets it through: removing that blocks it.
+          ask=confirm
+          ask_fit="Host and scope do not fit; use bxn egress rm."
+          ask_desc="Block $r for $name? Its open connections through the proxy end. y/n"
+          ask_args=("Blocking $r for $name" rm "$name" "$r")
         else
-          entry=${line%%$'\t'*}
-          from=${line#*$'\t'}
-          if [[ "$entry" != "$r" ]]; then
-            msg=$(tui_note "$msg" "$r is allowed through $entry ($from); to block it, remove that: bxn egress rm $name '$entry'")
-          else
-            ask=confirm
-            ask_fit="Host and scope do not fit; use bxn egress rm."
-            ask_desc="Block $r for $name? Its open connections through the proxy end. y/n"
-            ask_args=("Blocking $r for $name" rm "$name" "$r")
-          fi
+          # A wildcard lets it through too: name every entry that does.
+          seen="" cmd="" n=0
+          while IFS=$'\t' read -r entry from; do
+            seen+="${seen:+, }$entry ($from)"
+            cmd+=" '$entry'"
+            n=$((n + 1))
+          done <<<"$line"
+          why="remove that"
+          if ((n > 1)); then why="remove them all"; fi
+          msg=$(tui_note "$msg" "$r is allowed through $seen; to block it, $why: bxn egress rm $name$cmd")
         fi
       fi
       ;;
