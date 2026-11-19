@@ -935,21 +935,47 @@ status_busy_except_stop() {
   return 1
 }
 
+# How a container's list lets it reach <host>: the entry, a tab, and where it
+# comes from, read from `bxn egress ls --tsv` output. Fails when nothing on the
+# list matches. A wildcard is named before the host's own entry: while one
+# covers the host, taking the host's entry off leaves it reachable. A leading
+# "*." matches subdomains only, as in the proxy.
+# Usage: status_reach <tsv> <host>
+status_reach() {
+  local h src exact="" d="$2"
+  while IFS=$'\t' read -r h src; do
+    if [[ "$h" == "$2" ]]; then exact="$h"$'\t'"$src"; fi
+  done <<<"$1"
+  while [[ "$d" == *.* ]]; do
+    d=${d#*.}
+    while IFS=$'\t' read -r h src; do
+      if [[ "$h" == "*.$d" ]]; then
+        printf '%s\t%s\n' "$h" "$src"
+        return 0
+      fi
+    done <<<"$1"
+  done
+  [[ -n "$exact" ]] || return 1
+  printf '%s\n' "$exact"
+}
+
 # Starts an egress change as a background job, like start and stop, for the
 # instance in name.
 # Usage: status_egress_job <description> <bxn egress args...>
 status_egress_job() {
-  local desc="$1"
+  local desc="$1" doing=removing
   shift
   tui_job egress "$name" "$SCRIPT_DIR/bxn.egress" "$@"
   # Read by status_job_done, which runs in this shell, after this returns.
   printf '%s\n' "$desc" >"$log_file.desc"
   # The row it changes is marked until it finishes: <log> <container, or *
-  # for every one> <host> <what's happening>.
+  # for every one> <host> <what's happening>. A removal asked for from the
+  # Network tab is a block.
+  if [[ "$desc" == Blocking* ]]; then doing=blocking; fi
   case "$1:${2:-}" in
     allow:--all) busy+="$log_file"$'\t*\t'"${3:-}"$'\tallowing\n' ;;
     allow:*) busy+="$log_file"$'\t'"$2"$'\t'"${3:-}"$'\tallowing\n' ;;
-    rm:*) busy+="$log_file"$'\t'"$2"$'\t'"${3:-}"$'\tremoving\n' ;;
+    rm:*) busy+="$log_file"$'\t'"$2"$'\t'"${3:-}"$'\t'"$doing"$'\n' ;;
   esac
   msg=$(tui_note "$msg" "$desc…")
 }
@@ -1096,7 +1122,7 @@ status_draw() {
     if [[ $focus == list ]]; then
       keys="↑/↓ or j/k select · tab details · space start/stop · S force stop · D delete · q quit"
     elif [[ $tab == network ]]; then
-      keys="j/k select · a allow here · A allow everywhere · m mode · h/l tabs · tab list · q quit"
+      keys="j/k select · a/b allow/block here · A allow everywhere · m mode · h/l tabs · tab list · q quit"
     elif [[ $tab == rules ]]; then
       keys="j/k select · d remove · m mode · h/l tabs · tab list · q quit"
     elif [[ $wide == true ]]; then
@@ -1136,7 +1162,7 @@ status_answer() {
 }
 
 status_key() {
-  local key="$1" name r line verb why
+  local key="$1" name r line verb why entry from
   case "$key" in
     q | Q) leave=true ;;
     esc) if [[ $focus == info ]]; then focus=list; else leave=true; fi ;;
@@ -1170,6 +1196,31 @@ status_key() {
         fi
       fi
       ;;
+    b)
+      # Block: take the host off this container's list, wherever the entry
+      # comes from, as bxn egress rm does. Other containers keep it.
+      if [[ $focus == info && $tab == network ]] && ((${#tab_rows[@]} > 0)); then
+        name=${names[$sel]}
+        r=${tab_rows[$rsel]%%$'\t'*}
+        # Read now, not from the tab: this is the list the removal changes.
+        if ! line=$("$SCRIPT_DIR/bxn.egress" ls "$name" --tsv 2>/dev/null); then
+          msg=$(tui_note "$msg" "Could not read $name's hosts; nothing changed")
+        elif ! line=$(status_reach "$line" "$r"); then
+          msg=$(tui_note "$msg" "$r isn't on $name's list; there's nothing to block")
+        else
+          entry=${line%%$'\t'*}
+          from=${line#*$'\t'}
+          if [[ "$entry" != "$r" ]]; then
+            msg=$(tui_note "$msg" "$r is allowed through $entry ($from); to block it, remove that: bxn egress rm $name '$entry'")
+          else
+            ask=confirm
+            ask_fit="Host and scope do not fit; use bxn egress rm."
+            ask_desc="Block $r for $name? Its open connections through the proxy end. y/n"
+            ask_args=("Blocking $r for $name" rm "$name" "$r")
+          fi
+        fi
+      fi
+      ;;
     d)
       if [[ $focus == info && $tab == rules ]] && ((${#tab_rows[@]} > 0)); then
         name=${names[$sel]}
@@ -1179,7 +1230,7 @@ status_key() {
         # container's own list is always named last.
         if [[ ", ${line:45}" == *", $name" ]]; then
           ask=confirm
-          ask_fit="Host and scope do not fit; use bxn egress allow."
+          ask_fit="Host and scope do not fit; use bxn egress rm."
           ask_desc="Remove $r from $name? Its open connections through the proxy end. y/n"
           ask_args=("Removing $r from $name" rm "$name" "$r")
         else
