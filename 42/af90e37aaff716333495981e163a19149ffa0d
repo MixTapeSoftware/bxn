@@ -1,0 +1,25 @@
+bxn
+  s_14a4b08ec76cc9::t_2f571a2059fe86 938-942,945,954,958-962
+  s_14a4b08ec76cc9::t_4b88abad68766c 1213-1218,1220-1229
+  s_14a4b08ec76cc9::t_fe3d46921bc90b 1168
+README.md
+  s_14a4b08ec76cc9::t_c73011220218c3 811
+tests/egress_tui_test.sh
+  s_14a4b08ec76cc9::t_45924372899623 192,195-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "42af90e37aaff716333495981e163a19149ffa0d",
+  "prompts": {},
+  "sessions": {
+    "s_14a4b08ec76cc9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cf28f08-15e1-4c6f-a113-9eee22b0c8a8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
