@@ -40,14 +40,13 @@ assert_absent() {
   [[ "$3" != *"$2"* ]] || { printf 'FAIL: %s\n%s\n' "$1" "$3"; exit 1; }
   PASS=$((PASS+1))
 }
-export BOXEN_HANDLE=tester
 dry_run() { bash "$REPO_ROOT/boxen.create" audit --no-tui --vm --no-copy --dry-run "$@"; }
 
 # One agent per container, built into its name.
 for pair in 'claude:Claude Code' 'codex:Codex' 'grok:Grok Build'; do
   out="$(dry_run --agent "${pair%%:*}")"
   assert_contains "select ${pair#*:}" "Agent:       ${pair#*:}" "$out"
-  assert_contains "${pair#*:} is in the name" "Container:   tester-${pair%%:*}-audit" "$out"
+  assert_contains "${pair#*:} is in the name" "Container:   ${pair%%:*}-audit" "$out"
 done
 out="$(dry_run --claude)"
 assert_contains 'an agent flag chooses it' 'Agent:       Claude Code' "$out"
@@ -57,9 +56,9 @@ out="$(dry_run --agent claude --claude)"
 assert_contains 'naming the same agent twice is fine' 'Agent:       Claude Code' "$out"
 out="$(dry_run)"
 assert_contains 'with no agent chosen it is a shell' 'Agent:       Shell (no agent)' "$out"
-assert_contains 'and the name says shell' 'Container:   tester-shell-audit' "$out"
+assert_contains 'and the name says shell' 'Container:   shell-audit' "$out"
 out="$(dry_run --agent shell)"
-assert_contains '--agent shell chooses none' 'Container:   tester-shell-audit' "$out"
+assert_contains '--agent shell chooses none' 'Container:   shell-audit' "$out"
 for agent in 'Claude Code' Codex 'Grok Build'; do
   assert_absent "$agent isn't in the plugin list" "] $agent" "$out"
 done
@@ -86,7 +85,7 @@ PLUGIN_AGENT_COMMAND="extra-cli"
 EXTRA
 out="$(dry_run --agent extra-cli)"
 assert_contains 'discover user agent executable' 'Agent:       AAA Extra Agent' "$out"
-assert_contains 'its command names the container' 'Container:   tester-extra-cli-audit' "$out"
+assert_contains 'its command names the container' 'Container:   extra-cli-audit' "$out"
 out="$(dry_run --agent extra)"
 assert_contains 'discover user agent ID' 'Agent:       AAA Extra Agent' "$out"
 

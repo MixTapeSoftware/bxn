@@ -59,7 +59,6 @@ export BOXEN_NET_SUBNET=10.201.0.1/16
 export BOXEN_UFW_CONF="$SANDBOX/no-ufw.conf"
 export FAKE_EGRESS_CTL="$SCRIPT_DIR/lib/fake_egress_ctl"
 export FAKE_INCUS_VERSION=7.5.1
-export BOXEN_HANDLE=tester
 unset BOXEN_PLUGINS_SOURCE BOXEN_INSECURE_NETWORK
 
 fresh() {

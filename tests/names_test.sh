@@ -1,10 +1,10 @@
 #!/bin/bash
 # tests/names_test.sh
-# Container names: HANDLE-AGENT-PROJECT with one agent (or shell), numbered
-# -1, -2 when taken, labelled user.boxen=1 with the handle, agent and project;
-# the handle asked for once and kept; and commands finding a container from
-# its project. Builds against the fake `incus`, from a template so nothing is
-# provisioned.
+# Container names: AGENT-PROJECT with one agent (or shell), numbered -1, -2
+# when taken, labelled user.boxen=1 with the agent and project; commands
+# finding a container from its project, including one named before names lost
+# their handle (chad-claude-web). Builds against the fake `incus`, from a
+# template so nothing is provisioned.
 # Run: bash tests/names_test.sh
 
 set -euo pipefail
@@ -54,37 +54,29 @@ exists() { [[ -d "$FAKE_INCUS_STATE/instances/$1" ]] && echo yes || echo no; }
 names() { bash -c 'set -euo pipefail; log() { echo "[+] $1"; }; error() { echo "[ERROR] $1" >&2; exit 1; }
   source "$1/boxen.names"; eval "$2"' _ "$SANDBOX/repo" "$1"; }
 
-echo "the handle"
-assert_eq "none saved yet" "no" "$(names 'names_saved_handle >/dev/null && echo yes || echo no')"
-h="$(names 'names_handle' 2>/dev/null)"
-assert_eq "off a terminal it is the login name, made safe" "$(id -un | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9')" "$h"
-assert_eq "and it is kept" "$h" "$(cat "$BOXEN_CONFIG_DIR/handle")"
-rm -f "$BOXEN_CONFIG_DIR/handle"
-names 'names_handle --no-save' >/dev/null 2>&1
-assert_eq "--no-save keeps nothing" "no" "$([[ -f "$BOXEN_CONFIG_DIR/handle" ]] && echo yes || echo no)"
-assert_eq "BOXEN_HANDLE wins" "sam" "$(BOXEN_HANDLE=sam names 'names_handle')"
-out="$(bash "$SANDBOX/repo/bxn" handle 'Bad-Name' 2>&1)" && rc=0 || rc=$?
-assert_eq "a handle with a hyphen or capital is refused" "1" "$rc"
-bash "$SANDBOX/repo/bxn" handle chad >/dev/null
-assert_eq "bxn handle sets it" "chad" "$(cat "$BOXEN_CONFIG_DIR/handle")"
-assert_eq "bxn handle shows it" "chad" "$(bash "$SANDBOX/repo/bxn" handle)"
-
 echo "names and labels"
-build web
-assert_eq "a shell container is HANDLE-shell-PROJECT" "yes" "$(exists chad-shell-web)"
-assert_eq "it is labelled for boxen" "1" "$(cfg chad-shell-web user.boxen)"
-assert_eq "with its handle" "chad" "$(cfg chad-shell-web user.boxen.handle)"
-assert_eq "its agent" "shell" "$(cfg chad-shell-web user.boxen.agent)"
-assert_eq "and its project" "web" "$(cfg chad-shell-web user.boxen.project)"
+# A handle saved before names lost it is ignored, as is BOXEN_HANDLE.
+mkdir -p "$BOXEN_CONFIG_DIR"
+echo chad > "$BOXEN_CONFIG_DIR/handle"
+BOXEN_HANDLE=sam build web
+assert_eq "a shell container is shell-PROJECT" "yes" "$(exists shell-web)"
+assert_eq "with no handle, saved or set" "no no" "$(exists chad-shell-web) $(exists sam-shell-web)"
+assert_eq "it is labelled for boxen" "1" "$(cfg shell-web user.boxen)"
+assert_eq "without a handle" "" "$(cfg shell-web user.boxen.handle)"
+assert_eq "with its agent" "shell" "$(cfg shell-web user.boxen.agent)"
+assert_eq "and its project" "web" "$(cfg shell-web user.boxen.project)"
+out="$(bash "$SANDBOX/repo/boxen.create" dry --from base --no-tui --egress off --insecure-network --dry-run -p "$SANDBOX/ws" 2>&1)" || true
+assert_contains "a dry run names it the same way" "Container:   shell-dry" "$out"
+assert_eq "bxn handle is no longer a command" "no" "$(names 'names_is_command handle && echo yes || echo no')"
 # A first start that fails leaves a container bxn still knows (kept: no
 # answer to the delete prompt). Before the labels went on at creation it
 # was left unlabelled, invisible to bxn status, rm and short names.
-FAKE_INCUS_FAIL_CALL='^start chad-shell-fails$' build fails </dev/null
+FAKE_INCUS_FAIL_CALL='^start shell-fails$' build fails </dev/null
 assert_eq "a failed first start fails the build" "1" "$RC"
-assert_eq "and keeps the container" "yes" "$(exists chad-shell-fails)"
-assert_eq "labelled for boxen" "boxen" "$(cfg chad-shell-fails user.managed-by)"
-assert_eq "with its project" "fails" "$(cfg chad-shell-fails user.boxen.project)"
-assert_eq "and its workspace" "/workspace" "$(cfg chad-shell-fails user.boxen.workspace)"
+assert_eq "and keeps the container" "yes" "$(exists shell-fails)"
+assert_eq "labelled for boxen" "boxen" "$(cfg shell-fails user.managed-by)"
+assert_eq "with its project" "fails" "$(cfg shell-fails user.boxen.project)"
+assert_eq "and its workspace" "/workspace" "$(cfg shell-fails user.boxen.workspace)"
 echo "gh stack"
 rm -f "$FAKE_INCUS_STATE/gh.log"
 build stacks
@@ -94,12 +86,12 @@ assert_eq "a failed install doesn't fail the build" "0" "$RC"
 assert_contains "it says how to add it later" "gh extension install github/gh-stack" "$(cat "$SANDBOX/out")"
 echo "names and labels, continued"
 build web
-assert_eq "the next one for the project is numbered" "yes" "$(exists chad-shell-web-1)"
+assert_eq "the next one for the project is numbered" "yes" "$(exists shell-web-1)"
 build web
-assert_eq "and the one after that" "yes" "$(exists chad-shell-web-2)"
+assert_eq "and the one after that" "yes" "$(exists shell-web-2)"
 build web --agent fakeagent
-assert_eq "an agent is in the name" "yes" "$(exists chad-fakeagent-web)"
-assert_eq "and in its label" "fakeagent" "$(cfg chad-fakeagent-web user.boxen.agent)"
+assert_eq "an agent is in the name" "yes" "$(exists fakeagent-web)"
+assert_eq "and in its label" "fakeagent" "$(cfg fakeagent-web user.boxen.agent)"
 build web --agent fakeagent --agent shell
 assert_eq "two agents are refused" "1" "$RC"
 assert_contains "and it says why" "One agent per container" "$(cat "$SANDBOX/out")"
@@ -112,7 +104,7 @@ build web --needs-agent
 assert_eq "a plugin can't bring in an agent the container isn't for" "1" "$RC"
 assert_contains "and it says which" "Needs Agent needs the agent Fake Agent" "$(cat "$SANDBOX/out")"
 build needs --needs-agent --agent fakeagent
-assert_eq "it can require the container's own agent" "yes" "$(exists chad-fakeagent-needs)"
+assert_eq "it can require the container's own agent" "yes" "$(exists fakeagent-needs)"
 rm -f "$SANDBOX/repo/plugins/20-needs-agent.sh"
 build anything --name exact-one
 assert_eq "--name is used as given" "yes" "$(exists exact-one)"
@@ -125,101 +117,116 @@ build "$long"
 assert_contains "a name past 63 characters is refused" "longer than Incus allows" "$(cat "$SANDBOX/out")"
 
 echo "finding a container"
-assert_eq "an exact name is itself" "chad-shell-web-1" "$(names 'names_resolve chad-shell-web-1')"
-assert_eq "AGENT-PROJECT finds the one container" "chad-fakeagent-web" "$(names 'names_resolve fakeagent-web')"
+assert_eq "an exact name is itself" "shell-web-1" "$(names 'names_resolve shell-web-1')"
+assert_eq "AGENT-PROJECT finds the one container" "fakeagent-web" "$(names 'names_resolve fakeagent-web')"
 out="$(names 'names_resolve web' 2>&1)" && rc=0 || rc=$?
 assert_eq "a project with several containers is refused" "1" "$rc"
-assert_contains "and they are listed" "chad-shell-web" "$out"
+assert_contains "and they are listed" "shell-web" "$out"
 assert_eq "an unknown name is passed on" "nope" "$(names 'names_resolve nope')"
 build solo
-assert_eq "a project with one container finds it" "chad-shell-solo" "$(names 'names_resolve solo')"
-assert_eq "another handle's containers aren't found" "solo" "$(BOXEN_HANDLE=sam names 'names_resolve solo')"
-bash "$SANDBOX/repo/bxn" -k fakeagent-web >/dev/null
-assert_eq "bxn commands take the short form" "stop chad-fakeagent-web" "$(grep -E '^stop ' "$FAKE_INCUS_STATE/calls.log" | tail -1)"
-bash "$SANDBOX/repo/bxn" egress ls fakeagent-web >/dev/null 2>&1 || true
-assert_eq "so does bxn egress" "yes" "$(grep -q 'chad-fakeagent-web' "$FAKE_INCUS_STATE/calls.log" && echo yes || echo no)"
+assert_eq "a project with one container finds it" "shell-solo" "$(names 'names_resolve solo')"
+bash "$SANDBOX/repo/bxn" -k solo >/dev/null
+assert_eq "bxn commands take the short form" "stop shell-solo" "$(grep -E '^stop ' "$FAKE_INCUS_STATE/calls.log" | tail -1)"
+bash "$SANDBOX/repo/bxn" egress ls solo >/dev/null 2>&1 || true
+assert_eq "so does bxn egress" "yes" "$(grep -q 'shell-solo' "$FAKE_INCUS_STATE/calls.log" && echo yes || echo no)"
 build fakeagent-web
-assert_eq "a project named like AGENT-PROJECT" "yes" "$(exists chad-shell-fakeagent-web)"
-out="$(names 'names_resolve fakeagent-web' 2>&1)" && rc=0 || rc=$?
-assert_eq "is two containers: the project and the agent's" "1" "$rc"
-assert_contains "and both are listed" "chad-fakeagent-web chad-shell-fakeagent-web" "$out"
-incus delete --force chad-shell-fakeagent-web
+assert_eq "a project named like AGENT-PROJECT" "yes" "$(exists shell-fakeagent-web)"
+assert_eq "doesn't take the name from the agent's container, whose exact name it is" "fakeagent-web" "$(names 'names_resolve fakeagent-web')"
+incus delete --force shell-fakeagent-web
+
+echo "a container named with a handle"
+incus init img chad-claude-old -c user.boxen=1 -c user.boxen.handle=chad -c user.boxen.agent=claude -c user.boxen.project=old >/dev/null
+assert_eq "the project finds it" "chad-claude-old" "$(names 'names_resolve old')"
+assert_eq "so does AGENT-PROJECT" "chad-claude-old" "$(names 'names_resolve claude-old')"
+incus init img chad-claude-old-1 -c user.boxen=1 -c user.boxen.handle=chad -c user.boxen.agent=claude -c user.boxen.project=old >/dev/null
+assert_eq "and PROJECT-N its numbered copy" "chad-claude-old-1" "$(names 'names_resolve old-1' 2>/dev/null)"
+build old --agent fakeagent
+assert_eq "a new one for its project has no handle" "yes" "$(exists fakeagent-old)"
+out="$(names 'names_resolve old' 2>&1)" && rc=0 || rc=$?
+assert_eq "and the project then means both" "1" "$rc"
+assert_contains "so both are listed" "chad-claude-old chad-claude-old-1 fakeagent-old" "$out"
+assert_eq "while AGENT-PROJECT still tells them apart" "chad-claude-old" "$(names 'names_resolve claude-old' 2>/dev/null)"
 
 echo "a container and its numbered copies"
 build eo
 build eo
-assert_eq "a numbered copy is labelled with the project alone" "eo" "$(cfg chad-shell-eo-1 user.boxen.project)"
-assert_eq "the project finds the one without a number" "chad-shell-eo" "$(names 'names_resolve eo' 2>/dev/null)"
+assert_eq "a numbered copy is labelled with the project alone" "eo" "$(cfg shell-eo-1 user.boxen.project)"
+assert_eq "the project finds the one without a number" "shell-eo" "$(names 'names_resolve eo' 2>/dev/null)"
 err="$(names 'names_resolve eo' 2>&1 >/dev/null)"
-assert_contains "and names the others on stderr" "eo also matches chad-shell-eo-1; using chad-shell-eo" "$err"
-assert_eq "PROJECT-N finds that copy" "chad-shell-eo-1" "$(names 'names_resolve eo-1' 2>&1)"
-assert_eq "so does AGENT-PROJECT-N" "chad-shell-eo-1" "$(names 'names_resolve shell-eo-1' 2>&1)"
-assert_eq "AGENT-PROJECT takes the one without a number too" "chad-shell-eo" "$(names 'names_resolve shell-eo' 2>/dev/null)"
+assert_contains "and names the others on stderr" "eo also matches shell-eo-1; using shell-eo" "$err"
+assert_eq "PROJECT-N finds that copy" "shell-eo-1" "$(names 'names_resolve eo-1' 2>&1)"
+assert_eq "so does AGENT-PROJECT-N" "shell-eo-1" "$(names 'names_resolve shell-eo-1' 2>&1)"
+assert_eq "AGENT-PROJECT takes the one without a number too" "shell-eo" "$(names 'names_resolve shell-eo' 2>/dev/null)"
 assert_eq "a number with no copy is passed on" "eo-7" "$(names 'names_resolve eo-7')"
 out="$(names 'names_resolve --strict eo' 2>&1)" && rc=0 || rc=$?
 assert_eq "--strict refuses it" "1" "$rc"
-assert_contains "and lists them" "chad-shell-eo chad-shell-eo-1" "$out"
+assert_contains "and lists them" "shell-eo shell-eo-1" "$out"
 out="$(bash "$SANDBOX/repo/bxn" rm eo 2>&1)" && rc=0 || rc=$?
 assert_eq "bxn rm doesn't take a default" "1" "$rc"
-assert_eq "and deletes nothing" "yes yes" "$(exists chad-shell-eo) $(exists chad-shell-eo-1)"
+assert_eq "and deletes nothing" "yes yes" "$(exists shell-eo) $(exists shell-eo-1)"
 bash "$SANDBOX/repo/bxn" -k eo >/dev/null 2>&1
-assert_eq "other bxn commands take the default" "stop chad-shell-eo" "$(grep -E '^stop ' "$FAKE_INCUS_STATE/calls.log" | tail -1)"
+assert_eq "other bxn commands take the default" "stop shell-eo" "$(grep -E '^stop ' "$FAKE_INCUS_STATE/calls.log" | tail -1)"
 bash "$SANDBOX/repo/bxn" rm eo-1 >/dev/null 2>&1
-assert_eq "bxn rm takes PROJECT-N" "no yes" "$(exists chad-shell-eo-1) $(exists chad-shell-eo)"
+assert_eq "bxn rm takes PROJECT-N" "no yes" "$(exists shell-eo-1) $(exists shell-eo)"
 build eo --agent fakeagent
 out="$(names 'names_resolve eo' 2>&1)" && rc=0 || rc=$?
 assert_eq "two agents' containers for a project are refused" "1" "$rc"
-assert_contains "and both are listed" "chad-fakeagent-eo chad-shell-eo" "$out"
+assert_contains "and both are listed" "fakeagent-eo shell-eo" "$out"
 build eo --agent fakeagent
-assert_eq "AGENT-PROJECT picks among that agent's own" "chad-fakeagent-eo" "$(names 'names_resolve fakeagent-eo' 2>/dev/null)"
-incus delete --force chad-shell-eo
-incus delete --force chad-fakeagent-eo
+assert_eq "AGENT-PROJECT picks among that agent's own" "fakeagent-eo" "$(names 'names_resolve fakeagent-eo' 2>/dev/null)"
+incus delete --force shell-eo
+incus delete --force fakeagent-eo
 out="$(names 'names_resolve eo' 2>&1)" && rc=0 || rc=$?
-assert_eq "a lone numbered copy is found" "chad-fakeagent-eo-1" "$out"
+assert_eq "a lone numbered copy is found" "fakeagent-eo-1" "$out"
 build eo --agent fakeagent
 build eo --agent fakeagent
-incus delete --force chad-fakeagent-eo
+incus delete --force fakeagent-eo
 out="$(names 'names_resolve eo' 2>&1)" && rc=0 || rc=$?
 assert_eq "numbered copies with none unnumbered are refused" "1" "$rc"
-assert_contains "and listed" "chad-fakeagent-eo-1 chad-fakeagent-eo-2" "$out"
+assert_contains "and listed" "fakeagent-eo-1 fakeagent-eo-2" "$out"
 
 echo "the short name a build ends with"
 # The lines under "Shell in:", without the full name's.
 shell_in() { sed -n '/^Shell in:$/,/^$/p' "$SANDBOX/out" | sed '1d;/^$/d'; }
 build hint
 assert_eq "the full name, then the project, which opens it" \
-  "  bxn chad-shell-hint"$'\n'"  bxn hint    (short for it)" "$(shell_in)"
-assert_eq "and bxn takes that name for it" "chad-shell-hint" "$(names 'names_resolve hint')"
+  "  bxn shell-hint"$'\n'"  bxn hint    (short for it)" "$(shell_in)"
+assert_eq "and bxn takes that name for it" "shell-hint" "$(names 'names_resolve hint')"
 build hint --agent fakeagent
-assert_eq "another agent's container for the project: AGENT-PROJECT" \
-  "  bxn chad-fakeagent-hint"$'\n'"  bxn fakeagent-hint    (short for it)" "$(shell_in)"
+assert_eq "another agent's container for the project: the full name alone" \
+  "  bxn fakeagent-hint" "$(shell_in)"
 build hint
 assert_eq "a numbered copy: the project and its number" \
-  "  bxn chad-shell-hint-1"$'\n'"  bxn hint-1    (short for it)" "$(shell_in)"
+  "  bxn shell-hint-1"$'\n'"  bxn hint-1    (short for it)" "$(shell_in)"
 build hint --agent fakeagent
-assert_eq "a copy whose number another agent's copy has too: AGENT-PROJECT-N" \
-  "  bxn chad-fakeagent-hint-1"$'\n'"  bxn fakeagent-hint-1    (short for it)" "$(shell_in)"
+assert_eq "a copy whose number another agent's copy has too: the full name alone" \
+  "  bxn fakeagent-hint-1" "$(shell_in)"
 build hint --agent fakeagent
 assert_eq "a number no other copy has: the project and the number again" \
-  "  bxn chad-fakeagent-hint-2"$'\n'"  bxn hint-2    (short for it)" "$(shell_in)"
+  "  bxn fakeagent-hint-2"$'\n'"  bxn hint-2    (short for it)" "$(shell_in)"
 build status
-assert_eq "a project named like a command: AGENT-PROJECT, as bxn status is the command" \
-  "  bxn chad-shell-status"$'\n'"  bxn shell-status    (short for it)" "$(shell_in)"
+assert_eq "a project named like a command: the full name alone, as bxn status is the command" \
+  "  bxn shell-status" "$(shell_in)"
 build taken --name taken
 build taken
-assert_eq "a project that is another container's exact name: AGENT-PROJECT" \
-  "  bxn chad-shell-taken"$'\n'"  bxn shell-taken    (short for it)" "$(shell_in)"
+assert_eq "a project that is another container's exact name: the full name alone" \
+  "  bxn shell-taken" "$(shell_in)"
 build anything --name exact-two
 assert_eq "a name given exactly has no short form" "  bxn exact-two" "$(shell_in)"
-# Every hint is a name bxn opens as that container.
-for c in chad-shell-hint chad-fakeagent-hint chad-shell-hint-1 chad-fakeagent-hint-1 chad-fakeagent-hint-2 chad-shell-status; do
-  agent="${c#chad-}"; agent="${agent%%-*}"
-  proj="${c#chad-$agent-}"; proj="${proj%-[0-9]}"
-  short="$(names "names_short $c chad $agent $proj")"
-  assert_eq "$short opens $c" "$c" "$(names "names_resolve $short" 2>/dev/null)"
+# Asked again now that every hint container is built: a short name is one
+# bxn opens as that container, so hint and hint-1, which each mean two of
+# them now, are no longer given.
+for c in fakeagent-hint-2:hint-2 shell-hint: shell-hint-1: \
+  fakeagent-hint: fakeagent-hint-1: shell-status: shell-taken:; do
+  name="${c%%:*}"
+  agent="${name%%-*}"
+  proj="${name#"$agent"-}"; proj="${proj%-[0-9]}"
+  short="$(names "names_short $name $agent $proj || true")"
+  assert_eq "${name}'s short name is ${c#*:}" "${c#*:}" "$short"
+  [[ -z "$short" ]] || assert_eq "$short opens $name" "$name" "$(names "names_resolve $short" 2>/dev/null)"
 done
-assert_eq "no short name for a container that isn't HANDLE-AGENT-PROJECT" "none" \
-  "$(names 'names_short exact-two chad shell anything || echo none')"
+assert_eq "no short name for a container that isn't AGENT-PROJECT" "none" \
+  "$(names 'names_short exact-two shell anything || echo none')"
 # The words the dispatcher in bxn takes as commands are the ones names_short avoids.
 words="$(sed -n '/^case "\$1" in$/,/^esac$/p' "$SANDBOX/repo/bxn" | grep -E '^  [a-z|-]+\)' | sed 's/).*//' | tr '|' '\n' | tr -d ' ' | grep -v '^-' | sort -u)"
 assert_eq "bxn has commands to check" "yes" "$([[ "$(printf '%s\n' "$words" | grep -c .)" -ge 15 ]] && echo yes || echo no)"
@@ -229,22 +236,22 @@ assert_eq "every bxn command is known as one" "" "$missed"
 assert_eq "a project's name isn't a command" "no" "$(names 'names_is_command web && echo yes || echo no')"
 
 echo "a race for a name"
-# Another bxn creates chad-shell-race after this one chose the name.
+# Another bxn creates shell-race after this one chose the name.
 mkdir -p "$SANDBOX/racebin"
 cat > "$SANDBOX/racebin/incus" <<EOF
 #!/bin/bash
-if [[ "\$1 \$3" == "init chad-shell-race" && ! -e "$SANDBOX/raced" ]]; then
+if [[ "\$1 \$3" == "init shell-race" && ! -e "$SANDBOX/raced" ]]; then
   touch "$SANDBOX/raced"
-  "$SANDBOX/bin/incus" init img chad-shell-race >/dev/null 2>&1
-  echo theirs > "$FAKE_INCUS_STATE/instances/chad-shell-race/owner"
+  "$SANDBOX/bin/incus" init img shell-race >/dev/null 2>&1
+  echo theirs > "$FAKE_INCUS_STATE/instances/shell-race/owner"
 fi
 exec "$SANDBOX/bin/incus" "\$@"
 EOF
 chmod +x "$SANDBOX/racebin/incus"
 PATH="$SANDBOX/racebin:$PATH" build race
 assert_eq "the loser still builds" "0" "$RC"
-assert_eq "under the next number" "yes" "$(exists chad-shell-race-1)"
-assert_eq "and leaves the winner's container alone" "theirs" "$(cat "$FAKE_INCUS_STATE/instances/chad-shell-race/owner" 2>/dev/null)"
+assert_eq "under the next number" "yes" "$(exists shell-race-1)"
+assert_eq "and leaves the winner's container alone" "theirs" "$(cat "$FAKE_INCUS_STATE/instances/shell-race/owner" 2>/dev/null)"
 
 echo "the agent picker"
 if script -qec true /dev/null >/dev/null 2>&1; then
@@ -252,9 +259,9 @@ if script -qec true /dev/null >/dev/null 2>&1; then
     TERM=xterm script -qec "bash '$SANDBOX/repo/boxen.create' pick --from base --egress off --insecure-network --dry-run -p '$SANDBOX/ws'" /dev/null | sed $'s/\033\\[[0-9;?]*[A-Za-z]//g; s/\r//g'; }
   out="$(pick)"
   assert_contains "it lists a shell and the agents" "Fake Agent" "$out"
-  assert_contains "Enter on the first row is a shell" "Container:   chad-shell-pick" "$out"
+  assert_contains "Enter on the first row is a shell" "Container:   shell-pick" "$out"
   out="$(pick j)"
-  assert_contains "j then Enter picks the agent" "Container:   chad-fakeagent-pick" "$out"
+  assert_contains "j then Enter picks the agent" "Container:   fakeagent-pick" "$out"
   assert_contains "and the dry run names it" "Agent:       Fake Agent" "$out"
 else
   echo "  skip (needs util-linux script)"
