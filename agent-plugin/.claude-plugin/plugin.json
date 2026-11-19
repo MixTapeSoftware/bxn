@@ -1,0 +1,16 @@
+{
+  "name": "bxn",
+  "version": "0.1.0",
+  "description": "Teaches Claude Code to drive Boxen (bxn) on the host: boxes, their egress allowlists, and what can reach what.",
+  "author": {
+    "name": "MixTape Software"
+  },
+  "homepage": "https://github.com/MixTapeSoftware/bxn",
+  "repository": "https://github.com/MixTapeSoftware/bxn",
+  "keywords": [
+    "boxen",
+    "incus",
+    "sandbox",
+    "egress"
+  ]
+}

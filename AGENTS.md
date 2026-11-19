@@ -33,3 +33,10 @@ scripts share container lifecycle, workspace, and plugin setup across agents.
   PRs; the `stacked-prs` skill describes how.
 - Shared skills live in `.agents/skills/`; `.claude/skills` and
   `.grok/skills` link there for each agent's native discovery.
+- `agent-plugin/` is different: it's the bxn skill that users install into
+  Claude Code and Codex on their host, from this repository's marketplaces
+  (`.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`).
+  When a change alters a command, flag or behaviour that
+  `agent-plugin/skills/bxn/SKILL.md` describes, update the skill and bump
+  `version` in both `agent-plugin/*/plugin.json` files, so that installed
+  copies pick up the change.

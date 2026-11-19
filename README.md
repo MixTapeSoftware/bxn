@@ -55,6 +55,27 @@ This symlinks the helper scripts into `~/.local/bin`.
 
 It then offers to install [Chadmux](https://github.com/chadfennell/chadmux), Chad's tmux config, on your host (see [Daily Flow with tmux](#daily-flow-with-tmux)). The answer defaults to no. The question only appears when your host has no tmux config: an existing `~/.tmux.conf`, `~/.config/tmux`, or `$XDG_CONFIG_HOME/tmux` is never moved, replaced, or linked over. Pass `--chadmux` or `--no-chadmux` to decide without the prompt, and re-run `./install_shortcuts` to opt in later. Chadmux needs `git` and `tmux` on the host.
 
+### The bxn skill for agents on the host
+
+The bxn skill teaches Claude Code and Codex running on your host how to use bxn: creating and deleting boxes, opening hosts on their allowlists, serving ports, and what can reach what, including which steps (secrets, prompts, anything that widens access) it should leave to you. It ships as a plugin from this repository, for both agents. Agents inside a box can't run bxn, so it's for the host only.
+
+`./install_shortcuts` offers to install it when Claude Code or Codex is on your host without it. The answer defaults to no. Pass `--bxn-skill` or `--no-bxn-skill` to decide without the prompt, and re-run `./install_shortcuts` to opt in later.
+
+To install it yourself instead, in Claude Code:
+
+```
+/plugin install bxn --marketplace MixTapeSoftware/bxn
+```
+
+If your Claude Code doesn't accept `--marketplace`, add the marketplace first: `/plugin marketplace add MixTapeSoftware/bxn`, then `/plugin install bxn@bxn`. In Codex:
+
+```bash
+codex plugin marketplace add MixTapeSoftware/bxn
+codex plugin add bxn@bxn
+```
+
+To pull a new version into Claude Code, refresh the marketplace, then the plugin: `claude plugin marketplace update bxn`, then `claude plugin update bxn@bxn`, and restart Claude Code. Turning on auto-update for the marketplace in `/plugin` does both for you. In Codex, run `codex plugin marketplace upgrade bxn`.
+
 ## Quick Start
 
 ```bash
@@ -82,7 +103,7 @@ bxn my-project claude
 | `boxen.macos.setup` | — | Bootstrap Colima + Incus on macOS (called automatically by `boxen.create`) |
 | `bxn.new-plugin` | — | Scaffold a new plugin file from a template (also `bxn new-plugin`) |
 | `bxn.plugins` | — | Where the optional plugins come from; show, update, set (also `bxn plugins`) |
-| `install_shortcuts` | — | Symlink helpers and aliases into `~/.local/bin`; optionally install Chadmux on the host |
+| `install_shortcuts` | — | Symlink helpers and aliases into `~/.local/bin`; optionally install Chadmux and the bxn skill on the host |
 | `chadmux.host` | — | Install Chadmux on the host (called by `install_shortcuts`) |
 
 ### bxn — Unified CLI
