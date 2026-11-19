@@ -29,8 +29,10 @@ What follows from it:
 - `bxn egress allow` takes hostnames for 80 and 443. There is no `host:port` entry. For another port on a public host, the choices are `bxn egress mode <box> off` (ask first) or reaching the service over the tailnet.
 - A name that resolves to a private address (a corporate database, a LAN machine, a service on the host) stays blocked even with `mode off`. Route it over the tailnet with a narrow grant (one device, named ports), or rebuild the box with `--insecure-network` if the user accepts that.
 - If `bxn serve` succeeds but the page spins on the user's device, the tailnet policy doesn't allow that port to the box's tag. The user adds `tcp:<port>` to the rule for that tag.
-- Under the allowlist a box has no DNS of its own. A tool that ignores `HTTP_PROXY`/`HTTPS_PROXY` fails with a DNS error (`EAI_AGAIN`, `ENOTFOUND`). Fix the tool's proxy setting, not the list.
 - Before allowing anything, confirm the block with `bxn egress log <box>`, which lists blocked hosts first.
+- **The request fails, but the log shows no block for that host:** the tool isn't using the proxy, so the allowlist never saw the request, and allowing the host changes nothing. Under the allowlist a box has no DNS of its own, so such a tool fails with a DNS error (`EAI_AGAIN`, `ENOTFOUND`, "Temporary failure in name resolution"), or its connection is refused at once. Fix the tool's proxy setting.
+  - bxn sets `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and npm's proxy settings in the box, and gives Docker's client the proxy.
+  - Common tools that ignore those: the JVM, which needs `-Dhttps.proxyHost` and `-Dhttps.proxyPort`; containers a tool starts through Docker's API itself, such as the Supabase CLI's, which need the variables passed in through that tool's own config; Node's `fetch` before Node 22.21; and programs with their own HTTP client settings.
 
 ## More
 
