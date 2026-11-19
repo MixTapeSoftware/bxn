@@ -1,0 +1,19 @@
+agent-plugin/skills/bxn/SKILL.md
+  s_14a4b08ec76cc9::t_d91a5cff685f54 33-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "db8bb2ec6ec58b2f0281b2e031edc492fe082553",
+  "prompts": {},
+  "sessions": {
+    "s_14a4b08ec76cc9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cf28f08-15e1-4c6f-a113-9eee22b0c8a8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
