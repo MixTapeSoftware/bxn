@@ -1,0 +1,14 @@
+{
+  "name": "bxn",
+  "owner": {
+    "name": "MixTape Software"
+  },
+  "description": "The bxn skill, for agents that drive Boxen on the host.",
+  "plugins": [
+    {
+      "name": "bxn",
+      "source": "./agent-plugin",
+      "description": "Teaches Claude Code to drive Boxen (bxn) on the host: boxes, their egress allowlists, and what can reach what."
+    }
+  ]
+}

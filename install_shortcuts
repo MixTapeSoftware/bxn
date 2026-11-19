@@ -17,16 +17,22 @@ error() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Chadmux host tmux config: ask (interactive only), yes, or no.
+# Chadmux host tmux config, and the bxn skill for the host's coding agents:
+# ask (interactive only), yes, or no.
 CHADMUX="ask"
+BXN_SKILL="ask"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --chadmux)    CHADMUX="yes"; shift ;;
-    --no-chadmux) CHADMUX="no"; shift ;;
+    --chadmux)      CHADMUX="yes"; shift ;;
+    --no-chadmux)   CHADMUX="no"; shift ;;
+    --bxn-skill)    BXN_SKILL="yes"; shift ;;
+    --no-bxn-skill) BXN_SKILL="no"; shift ;;
     -h|--help)
-      echo "Usage: $(basename "$0") [--chadmux|--no-chadmux]"
-      echo "  --chadmux     Install the Chadmux tmux config on this host without asking"
-      echo "  --no-chadmux  Skip the Chadmux question"
+      echo "Usage: $(basename "$0") [--chadmux|--no-chadmux] [--bxn-skill|--no-bxn-skill]"
+      echo "  --chadmux       Install the Chadmux tmux config on this host without asking"
+      echo "  --no-chadmux    Skip the Chadmux question"
+      echo "  --bxn-skill     Install the bxn skill for Claude Code and Codex on this host without asking"
+      echo "  --no-bxn-skill  Skip the bxn skill question"
       exit 0
       ;;
     *) error "Unknown option: $1" ;;
@@ -168,6 +174,68 @@ case "$CHADMUX_STATE" in
     fi
     ;;
 esac
+
+# Optional: the bxn skill, a plugin for Claude Code and Codex from this
+# repository's marketplace, so an agent on this host knows how to drive bxn.
+# Off unless chosen, and only offered to the agents installed here that don't
+# have it yet. Both CLIs' install commands are safe to rerun.
+BXN_SKILL_MARKETPLACE="MixTapeSoftware/bxn"
+
+# The host's agents without the skill, space separated.
+bxn_skill_missing() {
+  local missing=""
+  if command -v claude >/dev/null 2>&1 &&
+    ! grep -qF '"bxn@bxn"' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" 2>/dev/null; then
+    missing="claude"
+  fi
+  if command -v codex >/dev/null 2>&1 &&
+    ! codex plugin list </dev/null 2>/dev/null | grep -Eq '^bxn@bxn[[:space:]]+installed'; then
+    missing="${missing:+$missing }codex"
+  fi
+  echo "$missing"
+}
+
+# Installs it for each agent named. One that fails doesn't stop the other.
+bxn_skill_install() {
+  local agent failed=""
+  for agent in $1; do
+    if [[ "$agent" == claude ]]; then
+      claude plugin install bxn --marketplace "$BXN_SKILL_MARKETPLACE" </dev/null || failed="${failed:+$failed }claude"
+    else
+      { codex plugin marketplace add "$BXN_SKILL_MARKETPLACE" && codex plugin add bxn@bxn; } </dev/null ||
+        failed="${failed:+$failed }codex"
+    fi
+  done
+  if [[ -n "$failed" ]]; then
+    warn "The bxn skill didn't install for: $failed. Re-run ./install_shortcuts --bxn-skill to retry"
+    return 1
+  fi
+  log "Installed the bxn skill for: $1"
+}
+
+if [[ "$BXN_SKILL" != "no" ]]; then
+  SKILL_AGENTS="$(bxn_skill_missing)"
+  if [[ -n "$SKILL_AGENTS" ]]; then
+    if [[ "$BXN_SKILL" == "ask" && -t 0 ]]; then
+      echo ""
+      echo "The bxn skill teaches coding agents on this host how to use bxn: creating"
+      echo "boxes, opening hosts on their allowlists, serving ports, and what can reach what."
+      read -rp "Install it for $SKILL_AGENTS (a plugin from github.com/$BXN_SKILL_MARKETPLACE)? [y/N] " reply || reply=""
+      [[ "$reply" =~ ^[Yy]$ ]] && BXN_SKILL="yes"
+    elif [[ "$BXN_SKILL" == "ask" ]]; then
+      log "To install the bxn skill for $SKILL_AGENTS: ./install_shortcuts --bxn-skill"
+    fi
+    if [[ "$BXN_SKILL" == "yes" ]]; then
+      bxn_skill_install "$SKILL_AGENTS" || true
+    fi
+  elif [[ "$BXN_SKILL" == "yes" ]]; then
+    if command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
+      log "The bxn skill is already installed for this host's agents"
+    else
+      warn "The bxn skill is for Claude Code or Codex, and this host has neither"
+    fi
+  fi
+fi
 
 echo ""
 log "Done! Make sure ~/.local/bin is in your PATH"
