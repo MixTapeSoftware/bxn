@@ -1,0 +1,39 @@
+agent-plugin/.claude-plugin/plugin.json
+  s_14a4b08ec76cc9::t_c3e93bf9e00fa4 1-16
+AGENTS.md
+  s_14a4b08ec76cc9::t_36c4aee97891cf 36-42
+agent-plugin/skills/bxn/SKILL.md
+  s_14a4b08ec76cc9::t_befb43cc1fd25b 1-37
+install_shortcuts
+  s_14a4b08ec76cc9::t_e412f67cbe7e51 20-21,23,26-29,31-35
+  s_14a4b08ec76cc9::t_b10754f3e6da8e 178-225,227-229,236-239
+  s_14a4b08ec76cc9::t_a5d834d0a239a0 226,230-235
+.agents/plugins/marketplace.json
+  s_14a4b08ec76cc9::t_f000def58dbedb 1-20
+tests/bxn_skill_test.sh
+  s_14a4b08ec76cc9::t_ebf388948d4d7c 1-114,117-151
+  s_14a4b08ec76cc9::t_3374bfcef3b5ab 115-116
+agent-plugin/.codex-plugin/plugin.json
+  s_14a4b08ec76cc9::t_a0591991593963 1-25
+README.md
+  s_14a4b08ec76cc9::t_32de1cfda9ac02 58-78
+  s_14a4b08ec76cc9::t_365a62dcdc121c 106
+.claude-plugin/marketplace.json
+  s_14a4b08ec76cc9::t_ec663140db5042 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a426c54d140333e1237ab87a7317e8236929a28d",
+  "prompts": {},
+  "sessions": {
+    "s_14a4b08ec76cc9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cf28f08-15e1-4c6f-a113-9eee22b0c8a8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
