@@ -1,8 +1,8 @@
 #!/bin/bash
 # tests/egress_tui_test.sh
 # The status view's allowlist parts: the lock mark in the list, the egress
-# rows in Info, the Network and Rules tabs, the allow, remove and mode keys
-# with their confirmations, the start key refusing a container behind the
+# rows in Info, the Network and Rules tabs, the allow, block, remove and mode
+# keys with their confirmations, the start key refusing a container behind the
 # boot barrier, and the delete key with its confirmation. Drives the live view in a pseudo-terminal against a
 # stubbed incus and a stubbed `bxn egress`.
 # Run: bash tests/egress_tui_test.sh
@@ -67,7 +67,10 @@ case "$1" in
     ;;
   # --applied: what the running proxy enforces; "applied" stands in for a
   # change that didn't apply.
-  ls) if [[ "${4:-}" == --applied && -f "$STUB/applied" ]]; then cat "$STUB/applied"; else cat "$STUB/rules"; fi ;;
+  ls)
+    # ls-fails: the container's list (not the applied one) can't be read.
+    if [[ "${4:-}" != --applied && -f "$STUB/ls-fails" ]]; then exit 1; fi
+    if [[ "${4:-}" == --applied && -f "$STUB/applied" ]]; then cat "$STUB/applied"; else cat "$STUB/rules"; fi ;;
   *)
     echo "$*" >> "$STUB/egress-calls"
     # A change takes this long, so a test can see the view while it runs.
@@ -170,6 +173,42 @@ assert_eq "y allows it everywhere" "allow --all docs.rs --yes" "$(cat "$S/egress
 out=$(keys '\t' l S | tui) || true
 assert_eq "S does nothing in the Network tab" "" "$(cat "$S/calls" 2>/dev/null)"
 
+echo "blocking from the Network tab"
+# The rows: docs.rs (blocked twice), the hostile name (blocked), then
+# api.anthropic.com (allowed, from the baseline).
+out=$(keys '\t' l | tui) || true
+assert_contains "the key help offers block" "a/b allow/block here" "$(last_frame "$out" | plain)"
+out=$(keys '\t' l b | tui) || true
+assert_contains "b on a host that isn't listed says so" "docs.rs isn't on box's list; there's nothing to block" "$(last_frame "$out" | plain)"
+assert_eq "and changes nothing" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+out=$(keys '\t' l j j b | tui) || true
+assert_contains "b asks about the exact host and container" "Block api.anthropic.com for box? Its open connections through the proxy end. y/n" "$(plain <<<"$out")"
+out=$(keys '\t' l j j b n | tui) || true
+assert_eq "n changes nothing" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+assert_contains "and says so" "Nothing changed" "$(last_frame "$out" | plain)"
+out=$(keys '\t' l j j b y | tui) || true
+assert_eq "y takes a baseline host off this container's list only" "rm box api.anthropic.com" "$(cat "$S/egress-calls" 2>/dev/null)"
+assert_contains "the result is shown" "box: done" "$(last_frame "$out" | plain)"
+printf '*.anthropic.com\tbaseline\n' > "$S/rules"
+out=$(keys '\t' l j j b y | KEEP_RULES=1 tui) || true
+assert_contains "a host a wildcard allows names the wildcard instead of asking" \
+  "api.anthropic.com is allowed through *.anthropic.com (baseline); to block it, remove that: bxn egress rm box '*.anthropic.com'" "$(plain <<<"$out")"
+assert_eq "and y changes nothing" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+printf '*.com\tbox\n*.anthropic.com\tbaseline\napi.anthropic.com\tbox\n' > "$S/rules"
+out=$(keys '\t' l j j b y | KEEP_RULES=1 tui) || true
+assert_contains "with more than one entry, it names them all, the nearest wildcard first" \
+  "api.anthropic.com is allowed through *.anthropic.com (baseline), *.com (box), api.anthropic.com (box); to block it, remove them all: bxn egress rm box '*.anthropic.com' '*.com' 'api.anthropic.com'" "$(plain <<<"$out")"
+assert_eq "and y changes nothing" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+touch "$S/ls-fails"
+out=$(keys '\t' l j j b y | tui) || true
+rm -f "$S/ls-fails"
+assert_contains "a list that can't be read blocks nothing" "Could not read box's hosts; nothing changed" "$(last_frame "$out" | plain)"
+assert_eq "and y changes nothing" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+out=$(keys '\t' l l b y | tui) || true
+assert_eq "b does nothing in the Rules tab" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+out=$(keys b y | tui) || true
+assert_eq "or in the list" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+
 echo "the tabs follow a change as soon as it's made"
 echo 1 > "$S/slow"
 out=$(keys '\t' l a y x x x | tui) || true
@@ -180,6 +219,11 @@ assert_eq "and the marker is gone" "no" "$([[ "$frame" == *"allowing…"* ]] && 
 out=$(keys '\t' l l j d y x x x | tui) || true
 assert_contains "while a removal runs, its row says so" "own.example" "$(plain <<<"$out" | grep -o 'own.example.*removing…' | head -1)"
 assert_eq "once it finishes, the host is gone from Rules" "no" "$([[ "$(last_frame "$out" | plain)" == *"own.example                                  box"* ]] && echo yes || echo no)"
+out=$(keys '\t' l j j b y x x x | tui) || true
+assert_contains "while a block runs, its row says so" "api.anthropic.com:443  · blocking…" "$(plain <<<"$out")"
+frame=$(last_frame "$out" | plain)
+assert_contains "once it finishes, the host reads as blocked" "blocked now      1  10:01:00  api.anthropic.com:443" "$frame"
+assert_eq "and the marker is gone" "no" "$([[ "$frame" == *"blocking…"* ]] && echo yes || echo no)"
 rm -f "$S/slow"
 printf 'own.example\tbox\n' > "$S/rules"
 out=$(keys '\t' l | KEEP_RULES=1 tui) || true
@@ -215,6 +259,13 @@ assert_contains "an unreadable confirmation directs to the CLI" "Host and scope 
 assert_eq "y cannot allow a host whose confirmation is clipped" "" "$(cat "$S/egress-calls" 2>/dev/null)"
 out=$(keys '\t' l A y | tui) || true
 assert_eq "y cannot allow a clipped host everywhere" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+printf '%s\tbox\n' "$long_host" > "$S/rules"
+out=$(keys '\t' l b y | KEEP_RULES=1 tui) || true
+assert_contains "an unreadable block confirmation directs to the CLI" "Host and scope do not fit; use bxn egress rm." "$(plain <<<"$out")"
+assert_eq "y cannot block a host whose confirmation is clipped" "" "$(cat "$S/egress-calls" 2>/dev/null)"
+out=$(keys '\t' l l d y | KEEP_RULES=1 tui) || true
+assert_contains "nor can d remove one, and it names rm" "Host and scope do not fit; use bxn egress rm." "$(plain <<<"$out")"
+assert_eq "y cannot remove a host whose confirmation is clipped" "" "$(cat "$S/egress-calls" 2>/dev/null)"
 
 # Wait for an initially readable confirmation, then shrink the terminal
 # while read is waiting for the answer. No redraw may be needed before y.
