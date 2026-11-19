@@ -1,55 +1,14 @@
 # boxen.names
-# Container names are HANDLE-AGENT-PROJECT: chad-claude-web, or chad-shell-web
-# with no agent. One agent per container keeps agents from working over each
-# other. Another container for the same project and agent is numbered, -1,
-# then -2, so parallel agents each get their own copy of the code. Each
-# container is labelled user.boxen=1 with its handle, agent and project, which
-# is how commands find it from the project alone (bxn web).
+# Container names are AGENT-PROJECT: claude-web, or shell-web with no agent.
+# One agent per container keeps agents from working over each other. Another
+# container for the same project and agent is numbered, -1, then -2, so
+# parallel agents each get their own copy of the code. Each container is
+# labelled user.boxen=1 with its agent and project, which is how commands find
+# it from the project alone (bxn web). Containers made before names lost their
+# handle (chad-claude-web) keep their names and the same labels, so they're
+# found the same way.
 #
 # Sourced by boxen.create and bxn, which define log and error.
-
-BOXEN_CONFIG_DIR="${BOXEN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/boxen}"
-BOXEN_HANDLE_FILE="$BOXEN_CONFIG_DIR/handle"
-
-# Lowercase letters and digits, starting with a letter: no hyphen, so the
-# handle is always the name's first part.
-names_valid_handle() { [[ "$1" =~ ^[a-z][a-z0-9]{0,19}$ ]]; }
-
-# The handle from BOXEN_HANDLE or the saved file, without asking.
-names_saved_handle() {
-  local h="${BOXEN_HANDLE:-}"
-  if [[ -z "$h" && -f "$BOXEN_HANDLE_FILE" ]]; then h="$(head -n 1 "$BOXEN_HANDLE_FILE")"; fi
-  [[ -n "$h" ]] || return 1
-  names_valid_handle "$h" || error "Bad handle '$h' (in BOXEN_HANDLE or $BOXEN_HANDLE_FILE): lowercase letters and digits, starting with a letter"
-  printf '%s\n' "$h"
-}
-
-names_save_handle() {
-  names_valid_handle "$1" || error "A handle is lowercase letters and digits, starting with a letter (got: $1)"
-  mkdir -p "$BOXEN_CONFIG_DIR" && printf '%s\n' "$1" > "$BOXEN_HANDLE_FILE" ||
-    error "Could not save the handle in $BOXEN_HANDLE_FILE"
-}
-
-# The handle, asked for once on a terminal (default: the login name) and saved.
-# Usage: names_handle [--no-save]
-names_handle() {
-  local h def answer
-  if h="$(names_saved_handle)"; then printf '%s\n' "$h"; return 0; fi
-  def="$(id -un | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9')"
-  names_valid_handle "$def" || def="me"
-  h="$def"
-  if [[ -t 0 && -t 2 ]]; then
-    printf 'Your handle starts every container name, as in %s-claude-web [%s]: ' "$def" "$def" >&2
-    IFS= read -r answer || answer=""
-    h="${answer:-$def}"
-  fi
-  names_valid_handle "$h" || error "A handle is lowercase letters and digits, starting with a letter (got: $h)"
-  if [[ "${1:-}" != "--no-save" ]]; then
-    names_save_handle "$h"
-    log "Your handle is $h; change it with: bxn handle <new>" >&2
-  fi
-  printf '%s\n' "$h"
-}
 
 # The first free name: base, then base-1, base-2 and so on.
 names_next() {
@@ -62,49 +21,50 @@ names_next() {
   printf '%s\n' "$name"
 }
 
-# Every container of handle H that ARG names as PROJECT or as AGENT-PROJECT,
-# one per line, unsorted. An agent's own name may hold a hyphen, so each split
-# is tried. Usage: names_matches H ARG
+# Every container that ARG names as PROJECT or as AGENT-PROJECT, one per line,
+# unsorted. An agent's own name may hold a hyphen, so each split is tried.
+# Usage: names_matches ARG
 names_matches() {
-  local h="$1" arg="$2" agent proj rest i
-  incus list user.boxen=1 "user.boxen.handle=$h" "user.boxen.project=$arg" --format csv --columns n 2>/dev/null || true
+  local arg="$1" agent proj rest i
+  incus list user.boxen=1 "user.boxen.project=$arg" --format csv --columns n 2>/dev/null || true
   rest="$arg"
   i=0
   while [[ "$rest" == *-* ]]; do
     i=$((i + 1))
     agent="$(printf '%s' "$arg" | cut -d- -f1-"$i")"
     proj="${arg#"$agent"-}"
-    incus list user.boxen=1 "user.boxen.handle=$h" "user.boxen.agent=$agent" "user.boxen.project=$proj" --format csv --columns n 2>/dev/null || true
+    incus list user.boxen=1 "user.boxen.agent=$agent" "user.boxen.project=$proj" --format csv --columns n 2>/dev/null || true
     rest="${rest#*-}"
   done
 }
 
-# The container a command means: the exact name if it exists, else your
-# container for that project, or for AGENT-PROJECT; with a number on the end
-# (web-1, claude-web-1), that numbered copy. Prints the argument unchanged
-# when nothing matches, so the command itself says it's not found.
+# The container a command means: the exact name if it exists, else the
+# container for that project, or for AGENT-PROJECT (which finds one made with a
+# handle, chad-claude-web); with a number on the end (web-1, claude-web-1),
+# that numbered copy. Prints the argument unchanged when nothing matches, so
+# the command itself says it's not found.
 #
-# When the name means a container and its numbered copies (chad-claude-web
-# and chad-claude-web-1), the one without a number is taken and the others
-# are named on stderr; with --strict, as bxn rm asks, it is refused instead.
+# When the name means a container and its numbered copies (claude-web and
+# claude-web-1), the one without a number is taken and the others are named
+# on stderr; with --strict, as bxn rm asks, it is refused instead.
 # Any other mix, such as two agents' containers for the project, is refused.
 # Usage: names_resolve [--strict] ARG
 names_resolve() {
-  local strict=0 arg h found="" base n c first="" others="" count
+  local strict=0 arg found="" base n c first="" others="" count
   if [[ "${1:-}" == "--strict" ]]; then strict=1; shift; fi
   arg="$1"
   if incus info "$arg" >/dev/null 2>&1; then printf '%s\n' "$arg"; return 0; fi
   # Only plain names: these values become Incus filters.
-  if ! [[ "$arg" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]] || ! h="$(names_saved_handle)"; then
+  if ! [[ "$arg" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
     printf '%s\n' "$arg"; return 0
   fi
-  found="$(names_matches "$h" "$arg")"
+  found="$(names_matches "$arg")"
   # PROJECT-N or AGENT-PROJECT-N: the copy names_next numbered N, which is
   # labelled with the project alone.
   if [[ "$arg" =~ ^(.+)-([0-9]+)$ ]]; then
     base="${BASH_REMATCH[1]}"
     n="${BASH_REMATCH[2]}"
-    for c in $(names_matches "$h" "$base"); do
+    for c in $(names_matches "$base"); do
       [[ "$c" != *"-$base-$n" ]] || found="$found"$'\n'"$c"
     done
   fi
@@ -138,31 +98,28 @@ names_resolve() {
 # called status is never opened by `bxn status`.
 names_is_command() {
   case "$1" in
-    help|shell|create|init|net|egress|serve|env|handle|rm|delete|kill|kill-all|\
+    help|shell|create|init|net|egress|serve|env|rm|delete|kill|kill-all|\
     update|update-all|status|cron|doctor|new-plugin|plugins|notify-snippet) return 0 ;;
   esac
   return 1
 }
 
-# The shortest thing to type for the container NAME, HANDLE-AGENT-PROJECT or a
-# numbered copy of it: its project, or AGENT-PROJECT when the project alone
-# means something else (another agent's container for it, say), each with the
-# copy's number. names_resolve is asked, so it's only ever a name bxn opens as
+# The shorter thing to type for the container NAME, AGENT-PROJECT or a
+# numbered copy of it: its project, with the copy's number, when that opens
+# this container and no other (not when another agent's container shares the
+# project, say). names_resolve is asked, so it's only ever a name bxn opens as
 # this container. Prints nothing and fails when there is none.
-# Usage: names_short NAME HANDLE AGENT PROJECT
+# Usage: names_short NAME AGENT PROJECT
 names_short() {
-  local name="$1" base="$2-$3-$4" n cand got
+  local name="$1" base="$2-$3" n cand got
   [[ "$name" == "$base"* ]] || return 1
   n="${name#"$base"}"
   [[ -z "$n" || "$n" =~ ^-[0-9]+$ ]] || return 1
-  for cand in "$4$n" "$3-$4$n"; do
-    names_is_command "$cand" && continue
-    # In a subshell: names_resolve stops with an error on a name that means
-    # two containers.
-    got="$(names_resolve "$cand" 2>/dev/null)" || continue
-    [[ "$got" == "$name" ]] || continue
-    printf '%s\n' "$cand"
-    return 0
-  done
-  return 1
+  cand="$3$n"
+  ! names_is_command "$cand" || return 1
+  # In a subshell: names_resolve stops with an error on a name that means
+  # two containers.
+  got="$(names_resolve "$cand" 2>/dev/null)" || return 1
+  [[ "$got" == "$name" ]] || return 1
+  printf '%s\n' "$cand"
 }

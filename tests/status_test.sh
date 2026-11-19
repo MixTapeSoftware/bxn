@@ -160,17 +160,17 @@ assert_eq "footer omits host" "2 of 4 running" "$(tail -n 1 <<<"$out")"
 mv "$stub/resources.json.off" "$stub/resources.json"
 
 echo "order:"
-# Incus lists by name, HANDLE-AGENT-PROJECT, which splits a project across
+# Incus lists by name, AGENT-PROJECT, which splits a project across
 # its agents. Boxen instances sort by project (the name without a label),
 # then name, with egress containers after them and other instances last.
 grp="$stub/grp"
 mkdir -p "$grp"
 jq -n '[
-  ["chad-claude-api",  {"user.boxen.project": "api"}],
-  ["chad-claude-web",  {"user.boxen.project": "web"}],
-  ["chad-codex-api-1", {"user.boxen.project": "api"}],
-  ["chad-codex-web",   {"user.boxen.project": "web"}],
-  ["chad-shell-web",   {"user.boxen.project": "web"}],
+  ["claude-api",       {"user.boxen.project": "api"}],
+  ["claude-web",       {"user.boxen.project": "web"}],
+  ["codex-api-1",      {"user.boxen.project": "api"}],
+  ["codex-web",        {"user.boxen.project": "web"}],
+  ["shell-web",        {"user.boxen.project": "web"}],
   ["egress-x",         {"user.boxen.role": "egress"}],
   ["old-box",          {}],
   ["other",            null]
@@ -179,9 +179,9 @@ jq -n '[
     state: {pid: 0, cpu: {usage: 0}, memory: {usage: 0}, disk: {}, network: {}}})' > "$grp/sample1.json"
 cp "$grp/sample1.json" "$grp/sample2.json"
 out=$(STUB="$grp" PATH="$stub:$PATH" bash "$REPO_ROOT/bxn" status 2>&1) || true
-order=$(grep -oE '(chad-[a-z0-9-]+|egress-x|old-box|other)' <<<"$out" | awk '!seen[$0]++' | paste -sd' ' -)
+order=$(grep -oE '((claude|codex|shell)-[a-z0-9-]+|egress-x|old-box|other)' <<<"$out" | awk '!seen[$0]++' | paste -sd' ' -)
 assert_eq "a project's instances sort together, helpers after, others last" \
-  "chad-claude-api chad-codex-api-1 old-box chad-claude-web chad-codex-web chad-shell-web egress-x other" "$order"
+  "claude-api codex-api-1 old-box claude-web codex-web shell-web egress-x other" "$order"
 
 echo "interactive:"
 # Drive the live view through a pseudo-terminal. Display order is alpha,

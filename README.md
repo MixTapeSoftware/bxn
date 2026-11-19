@@ -60,7 +60,7 @@ It then offers to install [Chadmux](https://github.com/chadfennell/chadmux), Cha
 ```bash
 # Create a VM (--container for a system container) with a copy of the
 # current directory in /workspace and one coding agent. It's named
-# HANDLE-AGENT-PROJECT, here chad-claude-my-project.
+# AGENT-PROJECT, here claude-my-project.
 bxn -c my-project --agent claude
 # Or: --agent codex, --agent grok, or --agent shell for none
 
@@ -156,7 +156,7 @@ Options:
   -t, --template            Save container as a reusable local template (empty workspace)
   --<plugin>                Pre-select a plugin (e.g. --1pass, --gh-token)
   --agent NAME              The coding agent: claude, codex, grok, or shell for none
-  --name NAME               Use NAME exactly, instead of HANDLE-AGENT-PROJECT
+  --name NAME               Use NAME exactly, instead of AGENT-PROJECT
   --vm                      Provision a KVM virtual machine (the default)
   --container               Provision a system container instead of a VM
   --no-copy                 Start with an empty workspace instead of copying the host directory
@@ -220,34 +220,34 @@ before the plugin picker and starts on "Shell (no agent)", or pass
 `--agent NAME` (`--agent shell` for none). Choosing two is refused.
 
 ```bash
-bxn -c web --agent claude          # chad-claude-web
-bxn -c web --agent claude          # chad-claude-web-1, a second agent on its own copy
-bxn -c web --agent codex           # chad-codex-web
-bxn -c web --agent shell           # chad-shell-web, for tests, git and servers
+bxn -c web --agent claude          # claude-web
+bxn -c web --agent claude          # claude-web-1, a second agent on its own copy
+bxn -c web --agent codex           # codex-web
+bxn -c web --agent shell           # shell-web, for tests, git and servers
 bxn -c --from web-base web --agent grok
 ```
 
-**Names.** A container is named `HANDLE-AGENT-PROJECT`. Your handle is asked
-for once, the first time you create one (it defaults to your login name), and
-kept in `~/.config/boxen/handle`. `bxn handle` shows it, and `bxn handle NEW`
-changes it for new containers. When the name is taken, the new container is
-numbered: `-1`, then `-2`. `--name NAME` uses a name exactly, and a template
-(`-t`) keeps the name you give it, since it becomes the image `incus-init/NAME`.
+**Names.** A container is named `AGENT-PROJECT`. When the name is taken, the
+new container is numbered: `-1`, then `-2`. `--name NAME` uses a name exactly,
+and a template (`-t`) keeps the name you give it, since it becomes the image
+`incus-init/NAME`. Containers made before Boxen dropped the handle from names
+(`chad-claude-web`) keep their names; `~/.config/boxen/handle` is no longer
+read.
 
-Every container is labelled `user.boxen=1`, with `user.boxen.handle`,
-`user.boxen.agent` and `user.boxen.project`, so `incus list user.boxen=1` lists
-them. Commands that take a container accept the project alone, or
-`AGENT-PROJECT`, when that finds exactly one of yours: `bxn web`,
-`bxn -n claude-web 3000`, `bxn egress log codex-web`. Add the number for a
-numbered copy: `bxn web-1`, `bxn claude-web-1`. When the name finds a
-container and its numbered copies, they take the one without a number and
-name the others; `bxn rm` refuses instead, so it never deletes a container you
-didn't name. With any other mix, such as two agents' containers for one
-project, they list them and ask you to name one. A build ends with the short
-name that opens the new container, under its full one: `bxn web`, or
-`bxn claude-web` when another agent has a container for the project, or
-`bxn web-1` for a numbered copy. It's the one that works when the build
-finishes; a container added later for the same project can make it mean both.
+Every container is labelled `user.boxen=1`, with `user.boxen.agent` and
+`user.boxen.project`, so `incus list user.boxen=1` lists them. Commands that
+take a container accept the project alone when that finds exactly one: `bxn web`,
+`bxn -n web 3000`, `bxn egress log web`. Add the number for a numbered copy:
+`bxn web-1`. When the name finds a container and its numbered copies, they take
+the one without a number and name the others; `bxn rm` refuses instead, so it
+never deletes a container you didn't name. With any other mix, such as two
+agents' containers for one project, they list them and ask you to name one. For
+a container named with a handle, `AGENT-PROJECT` finds it too: `bxn claude-web`
+opens `chad-claude-web`. A build ends with the short name that opens the new
+container, under its full one: `bxn web`, or `bxn web-1` for a numbered copy,
+and none when another agent has a container for the project. It's the one that
+works when the build finishes; a container added later for the same project can
+make it mean both.
 A container built with `--name`, and a template, have only the name they were
 given.
 
@@ -410,17 +410,17 @@ graph LR
 
 ```bash
 # Agent container — no credentials
-bxn -c project --agent claude                      # chad-claude-project
+bxn -c project --agent claude                      # claude-project
 
 # Dev container — with credentials
-bxn -c project --agent shell --1pass --gh-token    # chad-shell-project
+bxn -c project --agent shell --1pass --gh-token    # shell-project
 
 # Shell in with temporary sudo to install something
 bxn shell --with-sudo shell-project
 
 # Save as reusable template, then spin up new containers instantly
 bxn -c --template project-base
-bxn -c --from project-base project --agent claude  # chad-claude-project-1
+bxn -c --from project-base project --agent claude  # claude-project-1
 ```
 
 Each container works on its own copy. Work moves between containers, and back to the host, through git.
@@ -447,8 +447,8 @@ This is the full flow we use day to day: tmux runs on the host with [Chadmux](ht
 ```bash
 tmux new -s project                     # One session per project, on the host
 
-bxn -c project --agent claude         # First time only: chad-claude-project
-bxn -c project --agent shell --1pass --gh-token   # chad-shell-project
+bxn -c project --agent claude         # First time only: claude-project
+bxn -c project --agent shell --1pass --gh-token   # shell-project
 
 bxn claude-project                     # Pane 1: the agent container
 claude                                  #   ...then start the agent inside it
@@ -602,7 +602,7 @@ If you skipped the auth key, join later with:
 bxn shell --with-sudo project-dev "sudo tailscale up --operator=$USER"
 ```
 
-**Under the [egress allowlist](#egress-allowlist)** (the default for new containers), Tailscale relays through the container's proxy, and `*.tailscale.com` is on its list. The agent isn't Tailscale's operator, so it can't turn on an exit node (a way around the allowlist) or Funnel. Join as root from the host instead (`incus exec chad-shell-project-dev -- tailscale up --hostname=chad-shell-project-dev`, with the container's full name), and change served ports from the host with `bxn serve`:
+**Under the [egress allowlist](#egress-allowlist)** (the default for new containers), Tailscale relays through the container's proxy, and `*.tailscale.com` is on its list. The agent isn't Tailscale's operator, so it can't turn on an exit node (a way around the allowlist) or Funnel. Join as root from the host instead (`incus exec shell-project-dev -- tailscale up --hostname=shell-project-dev`, with the container's full name), and change served ports from the host with `bxn serve`:
 
 ```bash
 bxn serve project-dev            # list the mappings
