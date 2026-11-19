@@ -1,0 +1,27 @@
+tests/bxn_skill_test.sh
+  s_14a4b08ec76cc9::t_9222136c11d6b2 123-125
+  s_14a4b08ec76cc9::t_c01659383437a9 99-100
+README.md
+  s_14a4b08ec76cc9::t_79433826b47bbe 77
+  s_14a4b08ec76cc9::t_a1d2488ae4a35e 70
+agent-plugin/skills/bxn/SKILL.md
+  s_14a4b08ec76cc9::t_05dce0597f0660 21
+install_shortcuts
+  s_14a4b08ec76cc9::t_07a50cd587a16a 203-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1baefbe83c68956a67561a39d71a66c5298595a3",
+  "prompts": {},
+  "sessions": {
+    "s_14a4b08ec76cc9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cf28f08-15e1-4c6f-a113-9eee22b0c8a8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
