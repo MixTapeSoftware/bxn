@@ -1,0 +1,22 @@
+bxn
+  s_ef24a61a02d85b::t_2a8c54db6ce77e 308-332
+  s_ef24a61a02d85b::t_a12d126c649531 197-209,217
+tests/update_all_test.sh
+  s_ef24a61a02d85b::t_cbff3db3aa196f 201-225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1c2dd6afb17e904a622ed4a1c8e44f43a2b79b72",
+  "prompts": {},
+  "sessions": {
+    "s_ef24a61a02d85b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d51dfba6-76a1-45dd-8ac7-4b506c245639",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Chad Fennell <chadfennell@users.noreply.github.com>"
+    }
+  }
+}
