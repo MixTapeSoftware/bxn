@@ -738,7 +738,7 @@ bxn -u my-project
 bxn -ua
 ```
 
-`bxn -ua` starts stopped containers, updates them, then stops them again. Containers that were already running are left running. Only containers tagged with `user.managed-by=boxen` (set automatically during `bxn -c`) are updated. Non-Debian containers are skipped, and so is a container whose
+`bxn -ua` starts stopped containers, updates them, then stops them again. Containers that were already running are left running. Egress containers are updated first and kept up until the rest are done, since an allowlisted container's updates download through its proxy; one that was stopped is stopped again at the end, unless a container that uses it is running by then. Only containers tagged with `user.managed-by=boxen` (set automatically during `bxn -c`) are updated. Non-Debian containers are skipped, and so is a container whose
 `bxn -c` is still running. A container whose build never finished (its `bxn -c`
 was killed, or failed and you kept the container) is not started: not by
 `bxn -ua`, `bxn <name>` or the status view. It may still have the build's

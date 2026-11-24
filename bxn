@@ -197,8 +197,14 @@ cmd_update() {
 # Every run leaves a record for the login notice (cmd_notify_snippet), also
 # one that stops partway: incus missing from cron's PATH, a container that
 # won't start or stop.
+#
+# Egress containers go first and stay up until the others are done: an
+# allowlisted container's apt reaches the archive through its proxy there.
+# One that was stopped is stopped again at the end, unless a container using
+# it is running by then (a bxn create that ran alongside, say).
 cmd_update_all() {
-  local containers failed=() logfile name status was_running attempts why
+  local containers egresses row first="" rest="" stop_later="" users
+  local failed=() logfile name status was_running attempts why
   trap 'write_status failed "the run stopped before it finished; run bxn -ua to see why"' EXIT
   ensure_log_dir
   logfile="$BOXEN_LOG_DIR/update-$(date +%Y%m%d-%H%M%S).log"
@@ -212,8 +218,16 @@ cmd_update_all() {
     write_status ok
     return
   fi
+  egresses=$(incus list user.managed-by=boxen user.boxen.role=egress --format csv --columns n 2>/dev/null) || {
+    error "Failed to list egress containers"
+  }
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    if grep -qxF -- "${row%%,*}" <<< "$egresses"; then first+="$row"$'\n'; else rest+="$row"$'\n'; fi
+  done <<< "$containers"
 
   while IFS=, read -r name status; do
+    [[ -n "$name" ]] || continue
     was_running=0
     # Not while its build runs (apt would race the build's for the dpkg
     # lock), nor one whose build was abandoned (boxen.build).
@@ -262,16 +276,38 @@ cmd_update_all() {
       log "Updating $name..."
       cmd_update "$name" "$logfile" || why=update
     fi
-    # Only stop containers that were stopped before we started
+    # Only stop containers that were stopped before we started; an egress
+    # container once the others are done.
     if [[ "$was_running" == "0" ]]; then
-      log "Stopping $name..."
-      if ! incus stop "$name"; then
-        echo "  ⚠️  Could not stop $name" >&2
-        why=stop
+      if grep -qxF -- "$name" <<< "$egresses"; then
+        stop_later+="$name"$'\n'
+      else
+        log "Stopping $name..."
+        if ! incus stop "$name"; then
+          echo "  ⚠️  Could not stop $name" >&2
+          why=stop
+        fi
       fi
     fi
     [[ -z "$why" ]] || failed+=("$name")
-  done < <(echo "$containers")
+  done <<< "$first$rest"
+
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    if ! users=$(incus list "user.boxen.egress.container=$name" status=running --format csv --columns n 2>/dev/null); then
+      echo "  ⚠️  Leaving $name running: could not check whether containers that use it are running" >&2
+      continue
+    fi
+    if [[ -n "$users" ]]; then
+      log "Leaving $name running: ${users//$'\n'/ } use it"
+      continue
+    fi
+    log "Stopping $name..."
+    if ! incus stop "$name"; then
+      echo "  ⚠️  Could not stop $name" >&2
+      [[ " ${failed[*]-} " == *" $name "* ]] || failed+=("$name")
+    fi
+  done <<< "$stop_later"
 
   trap - EXIT
   echo ""
