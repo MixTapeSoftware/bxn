@@ -35,7 +35,7 @@ cp "$SCRIPT_DIR/lib/fake_incus" "$SANDBOX/bin/incus"
 printf '#!/bin/bash\necho "Unexpected sudo call" >&2\nexit 1\n' > "$SANDBOX/bin/sudo"
 chmod +x "$SANDBOX/bin/incus" "$SANDBOX/bin/sudo"
 export PATH="$SANDBOX/bin:$PATH"
-export XDG_DATA_HOME="$SANDBOX/data" BOXEN_HANDLE=tester
+export XDG_DATA_HOME="$SANDBOX/data"
 export FAKE_INCUS_STATE="$SANDBOX/state"
 
 # A host directory with a .env in it: copied, it would be warned about.
@@ -54,7 +54,7 @@ echo "a repository URL"
 # ===========================================================================
 dry_run notes https://github.com/MixTapeSoftware/bxn
 assert_eq "it's accepted" "0" "$RC"
-assert_contains "the project names the container" "Container:   tester-shell-notes" "$OUT"
+assert_contains "the project names the container" "Container:   shell-notes" "$OUT"
 assert_contains "the workspace is a clone of it" \
   "Workspace:   clone https://github.com/MixTapeSoftware/bxn into /workspace" "$OUT"
 assert_contains "GitHub Auth is selected" "[x] GitHub Auth" "$OUT"
@@ -232,8 +232,8 @@ assert_not_contains "the token isn't shown" "$TOKEN" "$OUT"
 touch "$SANDBOX/git-fail"
 build two
 assert_eq "a clone that fails still ends with a container" "0 yes" \
-  "$RC $([[ -d "$FAKE_INCUS_STATE/instances/tester-shell-two" ]] && echo yes || echo no)"
-assert_contains "the build says how to clone again" "bxn tester-shell-two 'git clone $URL .'" "$OUT"
+  "$RC $([[ -d "$FAKE_INCUS_STATE/instances/shell-two" ]] && echo yes || echo no)"
+assert_contains "the build says how to clone again" "bxn shell-two 'git clone $URL .'" "$OUT"
 assert_contains "and the summary says the workspace is empty" "Workspace:   empty $BWS ($URL didn't clone)" "$OUT"
 
 # A fresh build under an allowlist isn't run here; its order is read from the

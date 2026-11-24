@@ -32,10 +32,9 @@ Usage: bxn create [OPTIONS] <project> [<github-url>]
        $(basename "$0") [OPTIONS] <project> [<github-url>]   (the script directly)
 
 Create an Incus instance with a copy of a host directory as its workspace and
-at most one coding agent. It's named HANDLE-AGENT-PROJECT (chad-claude-web, or
-chad-shell-web with no agent); another one for the same project and agent is
-numbered -1, -2, so parallel agents each get their own copy. The handle is
-asked for once (bxn handle changes it).
+at most one coding agent. It's named AGENT-PROJECT (claude-web, or shell-web
+with no agent); another one for the same project and agent is numbered -1, -2,
+so parallel agents each get their own copy.
 Default image is Ubuntu 24.04. Shows a picker for the agent, then one for plugins.
 
 With a GitHub repository's URL (https://github.com/OWNER/REPO) the workspace is
@@ -64,7 +63,7 @@ Options:
   --vm-cpus N               VM vCPUs (default: 4)
   --ack-env                 Acknowledge .env files in the workspace (skip prompt)
   --agent NAME              The coding agent: claude, codex, grok, or shell for none
-  --name NAME               Use NAME exactly, instead of HANDLE-AGENT-PROJECT
+  --name NAME               Use NAME exactly, instead of AGENT-PROJECT
   --no-tui                  Skip interactive plugin selector, use defaults
                             (also the case without a terminal)
   --insecure-network        Use the default bridge: no isolation from other
@@ -269,7 +268,8 @@ CREATED_INSTANCE=0
 BUILD_RUN=""
 PROJECT=""
 EXACT_NAME=""
-HANDLE=""
+# 1 once the name is AGENT-PROJECT, made here, not given (--name, a template).
+GENERATED_NAME=0
 # The agent's plugin slot, -1 for none (a shell), empty until chosen.
 AGENT_SLOT=""
 AGENT_DEFAULT_SLOT=-1
@@ -1530,7 +1530,7 @@ done
 unset _n
 
 # A name given exactly (--name), or a template's (it becomes the image
-# incus-init/NAME), is checked now; HANDLE-AGENT-PROJECT waits for the agent.
+# incus-init/NAME), is checked now; AGENT-PROJECT waits for the agent.
 if [[ -n "$EXACT_NAME" ]]; then
   CONTAINER_NAME="$EXACT_NAME"
 elif [[ "$SAVE_TEMPLATE" == "1" ]]; then
@@ -1665,8 +1665,8 @@ fi
 AGENT_TOKEN="$(agent_token)"
 [[ -n "$AGENT_TOKEN" ]] || error "$(agent_label "$AGENT_SLOT") has no usable command name for the container name"
 if [[ -z "$CONTAINER_NAME" ]]; then
-  if [[ "$DRY_RUN" == "1" ]]; then HANDLE="$(names_handle --no-save)"; else HANDLE="$(names_handle)"; fi
-  CONTAINER_NAME="$(names_next "$HANDLE-$AGENT_TOKEN-$PROJECT")"
+  GENERATED_NAME=1
+  CONTAINER_NAME="$(names_next "$AGENT_TOKEN-$PROJECT")"
   [[ "$CONTAINER_NAME" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]] ||
     error "Invalid container name '$CONTAINER_NAME': it must start with a letter, with only letters, digits and hyphens"
 fi
@@ -1828,7 +1828,7 @@ fi
 # The tags go on at creation, so an instance whose first start fails is
 # still one bxn knows: status, rm, update-all and short names find it.
 # boxen.shell starts sessions in user.boxen.workspace; commands find a
-# container from its project by the handle and project (boxen.names).
+# container from its project by the project label (boxen.names).
 # The build's own record goes on with them (boxen.build): until it's done,
 # bxn doesn't start the container, and one whose builder is gone is
 # reported as abandoned.
@@ -1836,8 +1836,8 @@ BUILD_RUN="$$.$RANDOM$RANDOM.$(date +%s)"
 TAG_ARGS=(-c user.managed-by=boxen -c user.boxen=1 -c "user.boxen.agent=$AGENT_TOKEN"
   -c "user.boxen.workspace=$CONTAINER_WORKSPACE"
   -c user.boxen.build=running -c "user.boxen.builder=$$@$(boxen_boot_id)" -c "user.boxen.build.run=$BUILD_RUN")
-if [[ -n "$HANDLE" ]]; then
-  TAG_ARGS+=(-c "user.boxen.handle=$HANDLE" -c "user.boxen.project=$PROJECT")
+if [[ "$GENERATED_NAME" == "1" ]]; then
+  TAG_ARGS+=(-c "user.boxen.project=$PROJECT")
 fi
 if [[ "$INSECURE_NETWORK" == "1" ]]; then
   TAG_ARGS+=(-c user.boxen.net=open)
@@ -1871,8 +1871,8 @@ log "Creating container: $CONTAINER_NAME ($(basename "$BASE_IMAGE"))"
 # that container is theirs, so take the next number instead.
 _create_tries=0
 until create_instance; do
-  if [[ -n "$HANDLE" ]] && (( ++_create_tries < 5 )) && incus info "$CONTAINER_NAME" >/dev/null 2>&1; then
-    CONTAINER_NAME="$(names_next "$HANDLE-$AGENT_TOKEN-$PROJECT")"
+  if [[ "$GENERATED_NAME" == "1" ]] && (( ++_create_tries < 5 )) && incus info "$CONTAINER_NAME" >/dev/null 2>&1; then
+    CONTAINER_NAME="$(names_next "$AGENT_TOKEN-$PROJECT")"
     log "That name was just taken; creating $CONTAINER_NAME instead"
     continue
   fi
@@ -2248,7 +2248,7 @@ echo "Shell in:"
 echo "  bxn $CONTAINER_NAME"
 # The project alone, when that opens this container (boxen.names): not when
 # another agent's container shares the project, or the name wasn't generated.
-if [[ -n "$HANDLE" ]] && _short="$(names_short "$CONTAINER_NAME" "$HANDLE" "$AGENT_TOKEN" "$PROJECT")"; then
+if [[ "$GENERATED_NAME" == "1" ]] && _short="$(names_short "$CONTAINER_NAME" "$AGENT_TOKEN" "$PROJECT")"; then
   echo "  bxn $_short    (short for it)"
 fi
 unset _short

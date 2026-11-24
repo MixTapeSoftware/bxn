@@ -29,7 +29,7 @@ source "$SCRIPT_DIR/boxen.names"
 # shellcheck source=boxen.build
 source "$SCRIPT_DIR/boxen.build"
 
-# A command's container from what was typed: bxn web finds chad-claude-web
+# A command's container from what was typed: bxn web finds claude-web
 # (boxen.names). Replaces the first argument that isn't a flag; the result is
 # in RARGS. RESOLVE_STRICT=1 refuses a name that also matches numbered
 # copies instead of taking the one without a number, for bxn rm.
@@ -61,7 +61,7 @@ Commands:
   -s, shell [--with-sudo] <container> [cmd]
                                  Shell into container (--with-sudo grants temporary sudo)
   -c, create <project> [args...] Create a VM (--container for a system
-                                 container) named HANDLE-AGENT-PROJECT, with
+                                 container) named AGENT-PROJECT, with
                                  one agent (or a shell); numbered -1, -2 when
                                  the name is taken (bxn create -h)
   -c, create <project> <github-url>
@@ -69,8 +69,6 @@ Commands:
                                  its workspace, not a copy of this directory
   -c, create --template <name>   Build and save a reusable template, launched
                                  later with bxn -c <project> --from <name>
-  handle [<new>]                 Show or change your handle, the first part of
-                                 every container name
   -n, net <container> [ports...] Manage port proxies
   egress <command> [args...]     Which internet hosts a container may reach
                                  (bxn egress -h)
@@ -108,7 +106,7 @@ Cron:
   cron status                    Show current cron schedule
 
 A <container> can be the full name or just its project (or AGENT-PROJECT)
-when you have one container for it: bxn web opens chad-claude-web.
+when you have one container for it: bxn web opens claude-web.
 
 Examples:
   bxn                                       Live status view (same as bxn status)
@@ -418,7 +416,7 @@ cmd_set_env() {
 # ---------------------------------------------------------------------------
 STATUS_ORDER_DEFS='
 def managed: .expanded_config["user.managed-by"] == "boxen";
-# Names run HANDLE-AGENT-PROJECT, so name order splits a project across its
+# Names run AGENT-PROJECT, so name order splits a project across its
 # agents. Boxen instances sort by project label (the name when there is
 # none), then name, with helpers such as egress containers after them.
 def boxenkey: (.expanded_config // {}) as $c | .name as $n
@@ -1603,15 +1601,6 @@ case "$1" in
     resolve_container_arg "$@"
     cmd_set_env ${RARGS[@]+"${RARGS[@]}"}
     ;;
-  handle)
-    shift
-    if [[ $# -eq 0 ]]; then
-      names_saved_handle || echo "No handle yet: bxn create asks for one, or set it with bxn handle <new>"
-    else
-      names_save_handle "$1"
-      log "Your handle is now $1: new containers are named $1-AGENT-PROJECT"
-    fi
-    ;;
   rm|-d|delete)  # -d and delete are the old spellings, kept for scripts
     shift
     _force=0
@@ -1620,7 +1609,7 @@ case "$1" in
       if [[ "$_a" == --force || "$_a" == -f ]]; then _force=1; else _args+=("$_a"); fi
     done
     [[ ${#_args[@]} -lt 1 ]] && error "Usage: bxn rm [--force] <container>"
-    # Deleting takes no default: chad-claude-web and chad-claude-web-1 make
+    # Deleting takes no default: claude-web and claude-web-1 make
     # bxn rm web ambiguous, though bxn web opens the first.
     RESOLVE_STRICT=1 resolve_container_arg "${_args[@]}"
     set -- "${RARGS[@]}"
