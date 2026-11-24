@@ -155,6 +155,104 @@ box old STOPPED
 ua
 assert_contains "no build record: updated as before" "Updated old" "$OUT"
 
+echo "egress containers"
+
+# egress <name> <RUNNING|STOPPED>; agent <name> <RUNNING|STOPPED> <egress>
+egress() {
+  incus init images:debian/13 "$1" -c user.managed-by=boxen -c user.boxen.role=egress >/dev/null
+  [[ "$2" == STOPPED ]] || incus start "$1"
+}
+agent() {
+  incus init images:ubuntu/24.04 "$1" -c user.managed-by=boxen -c user.boxen=1 -c "user.boxen.egress.container=$3" >/dev/null
+  [[ "$2" == STOPPED ]] || incus start "$1"
+}
+# The starts, stops and updates (cmd_update's sh -c, as "apt NAME"), in order.
+calls() { grep -E '^(start|stop) |^exec [^ ]+ -- sh -c $' "$FAKE_INCUS_STATE/calls.log" | sed -E 's/^exec ([^ ]+) .*/apt \1/'; }
+# The line number of a call in calls().
+at() { calls | grep -nx -- "$1" | head -n 1 | cut -d: -f1; }
+
+# After bxn kill-all: everything stopped. An agent that sorts before the
+# egress container still finds it up, and it's stopped only at the end.
+fresh
+agent aider-web STOPPED boxen-egress; egress boxen-egress STOPPED; agent claude-web STOPPED boxen-egress
+ua
+assert_eq "all stopped: succeeds" "status=ok details=" "$(record)"
+assert_eq "the egress container is updated first" "start boxen-egress" "$(calls | head -n 1)"
+assert_eq "it's stopped after every agent's update (aider-web)" "yes" "$( [[ $(at 'apt aider-web') -lt $(at 'stop boxen-egress') ]] && echo yes || echo no)"
+assert_eq "…and claude-web" "yes" "$( [[ $(at 'apt claude-web') -lt $(at 'stop boxen-egress') ]] && echo yes || echo no)"
+assert_eq "it's stopped again, as it was" "STOPPED" "$(status boxen-egress)"
+assert_eq "the agents are stopped again" "STOPPED STOPPED" "$(status aider-web) $(status claude-web)"
+
+fresh
+egress boxen-egress RUNNING; agent claude-web STOPPED boxen-egress
+ua
+assert_eq "a running egress container: left running" "RUNNING" "$(status boxen-egress)"
+assert_eq "…never stopped" "" "$(calls | grep -x 'stop boxen-egress' || true)"
+
+# A container that uses it is running at the end (a bxn create alongside):
+# it keeps its proxy.
+fresh
+egress boxen-egress STOPPED; agent claude-web RUNNING boxen-egress
+ua
+assert_eq "one that uses it runs: left running" "RUNNING" "$(status boxen-egress)"
+assert_contains "…says why" "Leaving boxen-egress running: claude-web use it" "$OUT"
+assert_eq "…not a failure" "status=ok details=" "$(record)"
+
+# One that uses it is still being built: its bxn create may not have started
+# it yet, or stop and start it again.
+fresh
+egress boxen-egress STOPPED; agent claude-web STOPPED boxen-egress
+incus config set claude-web user.boxen.build=running "user.boxen.builder=$$@$BOOT"
+ua
+assert_eq "one that uses it is being built: left running" "RUNNING" "$(status boxen-egress)"
+assert_contains "…says why" "Leaving boxen-egress running: claude-web use it" "$OUT"
+
+# The check and the stop wait for the lock bxn create holds while it
+# registers a container and starts it.
+fresh
+egress boxen-egress STOPPED
+mkdir -p "$HOME/.local/state/boxen/lock" && echo "$$" > "$HOME/.local/state/boxen/lock/pid"
+ua
+assert_eq "the lock is held: it isn't stopped" "RUNNING" "$(status boxen-egress)"
+assert_contains "…says why" "Another bxn command has held" "$OUT"
+assert_contains "…recorded failed" "status=failed details=the run stopped" "$(record)"
+assert_eq "…the other's lock is left alone" "$$" "$(cat "$HOME/.local/state/boxen/lock/pid" 2>/dev/null)"
+
+fresh
+egress boxen-egress STOPPED
+ua
+assert_eq "the lock is let go after" "no" "$([[ -d "$HOME/.local/state/boxen/lock" ]] && echo yes || echo no)"
+
+# A container that uses another egress container doesn't keep this one up.
+fresh
+egress boxen-egress STOPPED; egress boxen-egress-two STOPPED; agent claude-web RUNNING boxen-egress-two
+ua
+assert_eq "another's user: this one is stopped" "STOPPED" "$(status boxen-egress)"
+assert_eq "…and the one it uses stays up" "RUNNING" "$(status boxen-egress-two)"
+
+fresh
+egress boxen-egress STOPPED; agent claude-web STOPPED boxen-egress
+export FAKE_INCUS_FAIL_CALL='^stop boxen-egress$'
+ua
+assert_eq "it won't stop: recorded failed, with its name" "status=failed details=boxen-egress" "$(record)"
+assert_contains "…says so" "Could not stop boxen-egress" "$OUT"
+
+# An update that fails and a stop that fails name it once.
+fresh
+egress boxen-egress STOPPED
+export FAKE_INCUS_FAIL_CALL='^stop boxen-egress$' FAKE_INCUS_FAIL_EXEC='apt-get'
+ua
+assert_eq "update and stop fail: named once" "status=failed details=boxen-egress" "$(record)"
+
+# The second list fails: nothing is started, and the run is recorded failed.
+fresh
+egress boxen-egress STOPPED; agent claude-web STOPPED boxen-egress
+export FAKE_INCUS_FAIL_CALL='^list user.managed-by=boxen user.boxen.role=egress'
+ua
+assert_eq "the egress list fails: exits non-zero" "1" "$RC"
+assert_eq "…starts nothing" "" "$(calls)"
+assert_contains "…recorded failed" "status=failed details=the run stopped" "$(record)"
+
 echo ""
 echo "passed: $PASS  failed: $FAIL"
 [[ $FAIL -eq 0 ]]
