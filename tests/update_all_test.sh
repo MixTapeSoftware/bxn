@@ -198,6 +198,31 @@ assert_eq "one that uses it runs: left running" "RUNNING" "$(status boxen-egress
 assert_contains "…says why" "Leaving boxen-egress running: claude-web use it" "$OUT"
 assert_eq "…not a failure" "status=ok details=" "$(record)"
 
+# One that uses it is still being built: its bxn create may not have started
+# it yet, or stop and start it again.
+fresh
+egress boxen-egress STOPPED; agent claude-web STOPPED boxen-egress
+incus config set claude-web user.boxen.build=running "user.boxen.builder=$$@$BOOT"
+ua
+assert_eq "one that uses it is being built: left running" "RUNNING" "$(status boxen-egress)"
+assert_contains "…says why" "Leaving boxen-egress running: claude-web use it" "$OUT"
+
+# The check and the stop wait for the lock bxn create holds while it
+# registers a container and starts it.
+fresh
+egress boxen-egress STOPPED
+mkdir -p "$HOME/.local/state/boxen/lock" && echo "$$" > "$HOME/.local/state/boxen/lock/pid"
+ua
+assert_eq "the lock is held: it isn't stopped" "RUNNING" "$(status boxen-egress)"
+assert_contains "…says why" "Another bxn command has held" "$OUT"
+assert_contains "…recorded failed" "status=failed details=the run stopped" "$(record)"
+assert_eq "…the other's lock is left alone" "$$" "$(cat "$HOME/.local/state/boxen/lock/pid" 2>/dev/null)"
+
+fresh
+egress boxen-egress STOPPED
+ua
+assert_eq "the lock is let go after" "no" "$([[ -d "$HOME/.local/state/boxen/lock" ]] && echo yes || echo no)"
+
 # A container that uses another egress container doesn't keep this one up.
 fresh
 egress boxen-egress STOPPED; egress boxen-egress-two STOPPED; agent claude-web RUNNING boxen-egress-two
